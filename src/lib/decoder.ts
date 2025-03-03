@@ -293,7 +293,13 @@ export function decodePassword(bytes: Uint8Array) {
 // Fonction pour convertir un UUID en chaîne de caractères
 export function uuidToStr(uuid: Uuid): string {
   try {
-    const uuidObj = new Uuid(Array.from(uuid.bytes));
+    const uuidBytes = new Uint8Array(uuid.bytes);
+    let uuidBytes2 = new Array(uuidBytes.length);
+    for (let i = 0; i < uuidBytes.length; i++) {
+      uuidBytes2[i] = uuidBytes[i];
+    }
+    const uuidObj = new Uuid(uuidBytes2);
+    console.log("uuidObj:", uuidObj);
     return uuidObj.toString();
   } catch (e) {
     console.error("Erreur lors de la conversion de l'UUID en chaîne:", e);

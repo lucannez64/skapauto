@@ -1,5 +1,5 @@
 // Service worker pour l'extension
-import { auth, get_all, loadClientFromFile } from './lib/client';
+import { auth, get_all, create_pass, loadClientFromFile } from './lib/client';
 import { type ClientEx, type Uuid, type Password } from './lib/decoder';
 
 // Importer la bibliothèque pour générer des codes TOTP
@@ -50,10 +50,7 @@ function storeClientSecurely(client: ClientEx): Promise<void> {
         client: client,
         expirationTime: expirationTime
       }
-    }, () => {
-      console.log('Client stocké de manière sécurisée avec expiration dans 1 heure');
-      resolve();
-    });
+    }, resolve);
   });
 }
 
@@ -111,33 +108,38 @@ async function getSecurePasswords(): Promise<Password[] | null> {
   });
 }
 
-// Écouter les messages du popup ou des scripts de contenu
+// Gérer les messages de l'extension
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Message reçu dans le background:', message);
   
   // Traiter les différents types de messages
   switch (message.action) {
-    case 'loadClient':
-      // Charger le client à partir d'un fichier
-      if (message.fileData) {
-        const arrayBuffer = base64ToArrayBuffer(message.fileData);
-        const client = loadClientFromFile(arrayBuffer);
-        if (client) {
-          currentClient = client;
-          // Stocker le client dans le stockage local pour le récupérer après un redémarrage
-          chrome.storage.local.set({ 'currentClient': client }, () => {
-            console.log('Client sauvegardé dans le stockage local');
-          });
-          sendResponse({ success: true, message: 'Client chargé avec succès' });
-        } else {
-          sendResponse({ success: false, message: 'Échec du chargement du client' });
-        }
-      }
-      break;
+    case 'fileSelected':
+      // Traiter directement le fichier sélectionné
+      handleFileSelected(message, sendResponse);
+      return true; // Indique que sendResponse sera appelé de manière asynchrone
+      
+    case 'checkSecureClient':
+      // Vérifier si un client sécurisé est disponible
+      getSecureClient()
+        .then((client) => {
+          if (client) {
+            currentClient = client;
+            sendResponse({ success: true });
+          } else {
+            sendResponse({ success: false });
+          }
+        })
+        .catch((error) => {
+          console.error('Erreur lors de la vérification du client sécurisé:', error);
+          sendResponse({ success: false, message: 'Erreur lors de la vérification du client sécurisé' });
+        });
+      return true; // Indique que sendResponse sera appelé de manière asynchrone
       
     case 'authenticate':
       // Authentifier le client
       if (currentClient && currentClient.id.id) {
+        console.log(currentClient)
         auth(currentClient.id.id!, currentClient.c)
           .then(result => {
             if (result.error) {
@@ -220,19 +222,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       break;
 
-    case 'checkSecureClient':
-      // Vérifier si un client sécurisé est disponible
-      getSecureClient()
-        .then(client => {
-          if (client) {
-            currentClient = client;
-            sendResponse({ success: true, message: 'Client sécurisé disponible' });
-          } else {
-            sendResponse({ success: false, message: 'Aucun client sécurisé disponible' });
-          }
-        });
-      return true; // Indique que la réponse sera envoyée de manière asynchrone
-
     case 'checkSecurePasswords':
       // Vérifier si des mots de passe sécurisés sont disponibles
       getSecurePasswords()
@@ -264,7 +253,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         try {
           const code = generateTOTPCode(message.params);
           sendResponse({ success: true, code: code });
-        } catch (error) {
+        } catch (error: any) {
           console.error('Erreur lors de la génération du code TOTP:', error);
           sendResponse({ success: false, message: error.toString() });
         }
@@ -272,6 +261,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, message: 'Paramètres TOTP manquants' });
       }
       break;
+
+    case 'saveNewCredential':
+      // Gère la sauvegarde d'un nouvel identifiant
+      handleSaveNewCredential(message, sendResponse);
+      return true; // Indique que sendResponse sera appelé de manière asynchrone
 
     default:
       sendResponse({ success: false, message: 'Action non reconnue' });
@@ -401,5 +395,126 @@ function generateTOTPCode(params: TOTPParams): string {
   } catch (error) {
     console.error('Erreur lors de la génération du code TOTP:', error);
     throw error;
+  }
+}
+
+/**
+ * Traite le fichier sélectionné et charge le client
+ */
+async function handleFileSelected(message: any, sendResponse: (response: any) => void) {
+  try {
+    console.log('Traitement du fichier sélectionné:', message.fileName);
+    
+    // Convertir les données base64 en ArrayBuffer
+    const arrayBuffer = base64ToArrayBuffer(message.fileData);
+    
+    // Charger le client
+    const client = loadClientFromFile(arrayBuffer);
+    
+    if (client) {
+      currentClient = client;
+      
+      // Stocker le client de manière sécurisée
+      await storeClientSecurely(client);
+      console.log('Client stocké de manière sécurisée');
+      
+      // Enregistrer les métadonnées du fichier pour référence
+      const fileMetadata = {
+        name: message.fileName || 'client.dat',
+        type: message.fileType || 'application/octet-stream',
+        size: message.fileSize || arrayBuffer.byteLength,
+        timestamp: Date.now()
+      };
+      
+      await chrome.storage.local.set({ 'clientFileMetadata': fileMetadata });
+      
+      // Notifier le popup que le client a été chargé
+      chrome.runtime.sendMessage({
+        action: 'clientLoaded',
+        success: true,
+        fileMetadata: fileMetadata
+      });
+      
+      // Répondre au message original si nécessaire
+      if (sendResponse) {
+        sendResponse({ success: true });
+      }
+    } else {
+      console.error('Format de fichier client invalide');
+      if (sendResponse) {
+        sendResponse({ success: false, message: 'Format de fichier client invalide' });
+      }
+    }
+  } catch (error: unknown) {
+    console.error('Erreur lors du chargement du client:', error);
+    if (sendResponse) {
+      sendResponse({ 
+        success: false, 
+        message: `Erreur lors du chargement du client: ${error instanceof Error ? error.message : 'Erreur inconnue'}`
+      });
+    }
+  }
+}
+
+/**
+ * Gère la sauvegarde d'un nouvel identifiant
+ * @param message Message contenant les informations d'identifiant
+ * @param sendResponse Fonction de réponse
+ */
+async function handleSaveNewCredential(message: any, sendResponse: (response: any) => void) {
+  try {
+    // Vérifier si le client est disponible
+    if (!currentClient) {
+      console.error('Client non disponible pour enregistrer les identifiants');
+      sendResponse({ success: false, message: 'Client non disponible' });
+      return;
+    }
+    
+    // Récupérer l'identifiant à enregistrer
+    const credential = message.credential;
+    if (!credential || !credential.username || !credential.password) {
+      console.error('Identifiants incomplets');
+      sendResponse({ success: false, message: 'Identifiants incomplets' });
+      return;
+    }
+    
+    // Créer un objet Password
+    const newPassword: Password = {
+      username: credential.username,
+      password: credential.password,
+      url: credential.url || null,
+      description: credential.description || null,
+      otp: credential.otp || null,
+      app_id: null
+    };
+    
+    // Récupérer l'UUID du client
+    if (!currentClient.id.id) {
+      console.error('UUID du client manquant');
+      sendResponse({ success: false, message: 'UUID du client manquant' });
+      return;
+    }
+    
+    // Appeler l'API pour créer le mot de passe
+    const result = await create_pass(currentClient.id.id, newPassword, currentClient.c);
+    
+    if (result.error) {
+      console.error('Erreur lors de la création du mot de passe:', result.error);
+      sendResponse({ success: false, message: result.error });
+      return;
+    }
+    
+    // Mettre à jour la liste des mots de passe en cache
+    const passwordsResult = await getSecurePasswords();
+    if (passwordsResult) {
+      const updatedPasswords = [...passwordsResult, newPassword];
+      await storePasswordsSecurely(updatedPasswords);
+    }
+    
+    console.log('Identifiants enregistrés avec succès');
+    sendResponse({ success: true });
+  } catch (error) {
+    console.error('Erreur lors de l\'enregistrement des identifiants:', error);
+    sendResponse({ success: false, message: error instanceof Error ? error.message : 'Erreur inconnue' });
   }
 } 

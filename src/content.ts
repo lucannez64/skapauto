@@ -11,6 +11,8 @@ interface Credential {
   url: string | null;
   description: string | null;
   otp?: string | null;
+  favicon?: string | null;
+  service?: string | null;
 }
 
 // Interface pour les paramètres TOTP
@@ -346,6 +348,9 @@ let otpAutofillAttempted = false;
     // Configurer l'observateur de mutations pour détecter les nouveaux champs de formulaire
     setupMutationObserver();
     
+    // Configurer la détection de soumission de formulaire pour sauvegarder les identifiants
+    setupFormSubmissionDetection();
+    
     console.log('Initialisation complète du script de contenu');
   } catch (error) {
     console.error('Erreur lors de l\'initialisation du script de contenu:', error);
@@ -383,8 +388,8 @@ function setupMutationObserver(): void {
     // Si de nouveaux champs ont été détectés, vérifier s'il s'agit de champs de formulaire
     if (newInputsDetected) {
       console.log('Nouveaux champs détectés, vérification...');
-      setTimeout(checkForNewLoginForms, 500); // Attendre que le DOM soit stable
-    }
+      setTimeout(checkForNewLoginForms, 1000); // Attendre que le DOM soit stable
+   }
   });
   
   // Observer les modifications du document
@@ -402,19 +407,32 @@ function setupMutationObserver(): void {
 async function checkForNewLoginForms(): Promise<void> {
   // Identifier les champs de formulaire
   const fields = identifyFormFields();
+  console.log('Champs de formulaire détectés:', fields);
   
   // Si des champs de formulaire sont détectés et que l'autofill n'a pas encore été tenté
-  if (fields.password.length > 0 && (fields.username.length > 0 || fields.email.length > 0)) {
+  if (fields.password.length > 0 || fields.username.length > 0 || fields.email.length > 0) {
     // Vérifier si les champs sont vides (non remplis)
-    const passwordEmpty = fields.password.some(field => !field.value);
-    const usernameEmpty = fields.username.some(field => !field.value) || 
-                          (fields.username.length === 0 && fields.email.some(field => !field.value));
+    const passwordEmpty = fields.password.some(field => !field.value || field.value === '');
+    const usernameEmpty = fields.username.some(field => !field.value || field.value === '') || 
+                          (fields.username.length === 0 && fields.email.some(field => !field.value || field.value === ''));
+    console.log(usernameEmpty);
+
     
     if (passwordEmpty && usernameEmpty) {
       console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
       await autoFillCredentials();
       autofillAttempted = true;
+    } else if (passwordEmpty) {
+      console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
+      await autoFillCredentials();
+      autofillAttempted = true;
+    } else if (usernameEmpty) {
+      console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
+      await autoFillCredentials();
+      otpAutofillAttempted = true;
     }
+    
+    
   }
   
   // Si des champs OTP sont détectés et que l'autofill OTP n'a pas encore été tenté
@@ -534,8 +552,141 @@ async function getMatchingCredentials(): Promise<Credential[]> {
 }
 
 /**
- * Tente de remplir automatiquement les champs avec les identifiants correspondants
+ * Affiche un menu de confirmation pour l'autofill
+ * @param credential Identifiant à utiliser
  */
+function showConfirmationMenu(credential: Credential): void {
+  // Supprimer tout menu existant
+  const existingMenu = document.getElementById('skapauto-confirmation-menu');
+  if (existingMenu) {
+    existingMenu.remove();
+  }
+  
+  // Créer le menu
+  const menu = document.createElement('div');
+  menu.id = 'skapauto-confirmation-menu';
+  menu.style.position = 'fixed';
+  menu.style.top = '10px';
+  menu.style.right = '10px';
+  menu.style.backgroundColor = '#ced7e1';
+  menu.style.borderRadius = '0.5rem';
+  menu.style.padding = '16px';
+  menu.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  menu.style.zIndex = '9999';
+  menu.style.maxWidth = '300px';
+  menu.style.fontFamily = "'Work Sans', sans-serif";
+  menu.style.transition = 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out';
+  
+  // Ajouter un titre
+  const title = document.createElement('div');
+  title.textContent = 'Confirmer l\'autofill';
+  title.style.fontFamily = "'Raleway', sans-serif";
+  title.style.fontWeight = 'bold';
+  title.style.marginBottom = '10px';
+  title.style.borderBottom = '1px solid #1d1b21';
+  title.style.paddingBottom = '5px';
+  title.style.color = '#1d1b21';
+  menu.appendChild(title);
+  
+  // Ajouter les informations du compte
+  const info = document.createElement('div');
+  info.style.marginBottom = '10px';
+  info.style.padding = '5px';
+  
+  const usernameSpan = document.createElement('div');
+  usernameSpan.textContent = `Nom d'utilisateur: ${credential.username}`;
+  usernameSpan.style.fontWeight = 'bold';
+  usernameSpan.style.color = '#1d1b21';
+  info.appendChild(usernameSpan);
+  
+  const serviceSpan = document.createElement('div');
+  serviceSpan.textContent = `Service: ${credential.url}`;
+  serviceSpan.style.color = '#474b4f';
+  serviceSpan.style.fontSize = '0.9em';
+  info.appendChild(serviceSpan);
+  
+  menu.appendChild(info);
+  
+  // Conteneur pour les boutons
+  const buttonContainer = document.createElement('div');
+  buttonContainer.style.display = 'flex';
+  buttonContainer.style.justifyContent = 'space-between';
+  buttonContainer.style.gap = '10px';
+  buttonContainer.style.marginTop = '16px';
+  
+  // Bouton Accepter
+  const acceptButton = document.createElement('div');
+  acceptButton.textContent = 'Accepter';
+  acceptButton.style.flex = '1';
+  acceptButton.style.textAlign = 'center';
+  acceptButton.style.padding = '8px';
+  acceptButton.style.backgroundColor = '#a7f3ae';
+  acceptButton.style.color = '#1d1b21';
+  acceptButton.style.borderRadius = '0.375rem';
+  acceptButton.style.cursor = 'pointer';
+  acceptButton.style.transition = 'all 0.2s ease-in-out';
+  acceptButton.addEventListener('mouseover', () => {
+    acceptButton.style.opacity = '0.9';
+    acceptButton.style.transform = 'translateY(-1px)';
+  });
+  acceptButton.addEventListener('mouseout', () => {
+    acceptButton.style.opacity = '1';
+    acceptButton.style.transform = 'translateY(0)';
+  });
+  acceptButton.addEventListener('click', () => {
+    fillPasswordForm(credential.username, credential.password);
+    menu.remove();
+  });
+  
+  // Bouton Annuler
+  const cancelButton = document.createElement('div');
+  cancelButton.textContent = 'Annuler';
+  cancelButton.style.flex = '1';
+  cancelButton.style.textAlign = 'center';
+  cancelButton.style.padding = '8px';
+  cancelButton.style.backgroundColor = '#f2c3c2';
+  cancelButton.style.color = '#1d1b21';
+  cancelButton.style.borderRadius = '0.375rem';
+  cancelButton.style.cursor = 'pointer';
+  cancelButton.style.transition = 'all 0.2s ease-in-out';
+  cancelButton.addEventListener('mouseover', () => {
+    cancelButton.style.opacity = '0.9';
+    cancelButton.style.transform = 'translateY(-1px)';
+  });
+  cancelButton.addEventListener('mouseout', () => {
+    cancelButton.style.opacity = '1';
+    cancelButton.style.transform = 'translateY(0)';
+  });
+  cancelButton.addEventListener('click', () => {
+    menu.remove();
+  });
+  
+  buttonContainer.appendChild(acceptButton);
+  buttonContainer.appendChild(cancelButton);
+  menu.appendChild(buttonContainer);
+  
+  // Ajouter le menu à la page
+  document.body.appendChild(menu);
+  
+  // Ajouter l'effet de survol sur le menu
+  menu.addEventListener('mouseover', () => {
+    menu.style.transform = 'translateY(-2px)';
+    menu.style.boxShadow = '0 6px 8px rgba(0, 0, 0, 0.15)';
+  });
+  menu.addEventListener('mouseout', () => {
+    menu.style.transform = 'translateY(0)';
+    menu.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  });
+  
+  // Fermer le menu après 30 secondes s'il n'a pas été fermé
+  setTimeout(() => {
+    if (document.getElementById('skapauto-confirmation-menu')) {
+      document.getElementById('skapauto-confirmation-menu')!.remove();
+    }
+  }, 30000);
+}
+
+// Modifier la fonction autoFillCredentials pour utiliser le menu de confirmation
 async function autoFillCredentials(): Promise<void> {
   // Récupérer les identifiants correspondants
   const credentials = await getMatchingCredentials();
@@ -546,14 +697,14 @@ async function autoFillCredentials(): Promise<void> {
     return;
   }
   
-  // Si un seul identifiant correspond, le remplir automatiquement
+  // Si un seul identifiant correspond, afficher le menu de confirmation
   if (credentials.length === 1) {
-    console.log('Un seul identifiant correspondant trouvé, remplissage automatique');
-    fillPasswordForm(credentials[0].username, credentials[0].password);
+    console.log('Un seul identifiant correspondant trouvé, affichage du menu de confirmation');
+    showConfirmationMenu(credentials[0]);
     return;
   }
   
-  // Si plusieurs identifiants correspondent, afficher un menu de sélection
+  // Si plusieurs identifiants correspondent, afficher le menu de sélection
   console.log('Plusieurs identifiants correspondants trouvés, affichage du menu de sélection');
   showCredentialSelectionMenu(credentials);
 }
@@ -575,61 +726,83 @@ function showCredentialSelectionMenu(credentials: Credential[]): void {
   menu.style.position = 'fixed';
   menu.style.top = '10px';
   menu.style.right = '10px';
-  menu.style.backgroundColor = '#ffffff';
-  menu.style.border = '1px solid #cccccc';
-  menu.style.borderRadius = '5px';
-  menu.style.padding = '10px';
-  menu.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.1)';
+  menu.style.backgroundColor = '#ced7e1';
+  menu.style.borderRadius = '0.5rem';
+  menu.style.padding = '16px';
+  menu.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
   menu.style.zIndex = '9999';
   menu.style.maxWidth = '300px';
-  menu.style.fontFamily = 'Arial, sans-serif';
+  menu.style.fontFamily = "'Work Sans', sans-serif";
+  menu.style.transition = 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out';
   
   // Ajouter un titre
   const title = document.createElement('div');
   title.textContent = 'Choisir un identifiant';
+  title.style.fontFamily = "'Raleway', sans-serif";
   title.style.fontWeight = 'bold';
   title.style.marginBottom = '10px';
-  title.style.borderBottom = '1px solid #eeeeee';
+  title.style.borderBottom = '1px solid #1d1b21';
   title.style.paddingBottom = '5px';
+  title.style.color = '#1d1b21';
   menu.appendChild(title);
   
   // Ajouter les options
   credentials.forEach((credential, index) => {
     const option = document.createElement('div');
-    option.style.padding = '5px';
+    option.style.padding = '8px';
     option.style.cursor = 'pointer';
-    option.style.borderBottom = index < credentials.length - 1 ? '1px solid #eeeeee' : 'none';
-    option.style.display = 'flex';
-    option.style.justifyContent = 'space-between';
-    option.style.alignItems = 'center';
+    option.style.borderBottom = index < credentials.length - 1 ? '1px solid #1d1b21' : 'none';
+    option.style.transition = 'all 0.2s ease-in-out';
     
-    // Ajouter le nom d'utilisateur
-    const usernameSpan = document.createElement('span');
-    usernameSpan.textContent = credential.username;
-    usernameSpan.style.fontWeight = 'bold';
-    option.appendChild(usernameSpan);
+    // Conteneur pour les informations
+    const infoContainer = document.createElement('div');
     
-    // Ajouter la description si disponible
-    if (credential.description) {
-      const descriptionSpan = document.createElement('span');
-      descriptionSpan.textContent = credential.description;
-      descriptionSpan.style.fontSize = '0.8em';
-      descriptionSpan.style.color = '#666666';
-      option.appendChild(descriptionSpan);
+    // Service et favicon
+    const serviceContainer = document.createElement('div');
+    serviceContainer.style.display = 'flex';
+    serviceContainer.style.alignItems = 'center';
+    serviceContainer.style.marginBottom = '4px';
+    
+    if (credential.favicon) {
+      const favicon = document.createElement('img');
+      favicon.src = credential.favicon;
+      favicon.style.width = '16px';
+      favicon.style.height = '16px';
+      favicon.style.marginRight = '8px';
+      serviceContainer.appendChild(favicon);
     }
     
-    // Ajouter l'événement de clic
-    option.addEventListener('click', () => {
-      fillPasswordForm(credential.username, credential.password);
-      menu.remove();
-    });
+    const serviceName = document.createElement('span');
+    serviceName.textContent = credential.url || 'Identifiant';
+    serviceName.style.fontWeight = 'bold';
+    serviceName.style.color = '#1d1b21';
+    serviceContainer.appendChild(serviceName);
     
-    // Ajouter un effet de survol
+    infoContainer.appendChild(serviceContainer);
+    
+    // Nom d'utilisateur
+    const username = document.createElement('div');
+    username.textContent = credential.username;
+    username.style.fontSize = '0.9em';
+    username.style.color = '#474b4f';
+    infoContainer.appendChild(username);
+    
+    option.appendChild(infoContainer);
+    
+    // Effets de survol
     option.addEventListener('mouseover', () => {
-      option.style.backgroundColor = '#f5f5f5';
+      option.style.backgroundColor = '#f0f0f0';
+      option.style.transform = 'translateX(5px)';
     });
     option.addEventListener('mouseout', () => {
       option.style.backgroundColor = 'transparent';
+      option.style.transform = 'translateX(0)';
+    });
+    
+    // Événement de clic
+    option.addEventListener('click', () => {
+      fillPasswordForm(credential.username, credential.password);
+      menu.remove();
     });
     
     menu.appendChild(option);
@@ -639,11 +812,22 @@ function showCredentialSelectionMenu(credentials: Credential[]): void {
   const closeButton = document.createElement('div');
   closeButton.textContent = 'Fermer';
   closeButton.style.textAlign = 'center';
-  closeButton.style.marginTop = '10px';
-  closeButton.style.padding = '5px';
-  closeButton.style.backgroundColor = '#f5f5f5';
-  closeButton.style.borderRadius = '3px';
+  closeButton.style.marginTop = '16px';
+  closeButton.style.padding = '8px';
+  closeButton.style.backgroundColor = '#f2c3c2';
+  closeButton.style.color = '#1d1b21';
+  closeButton.style.borderRadius = '0.375rem';
   closeButton.style.cursor = 'pointer';
+  closeButton.style.transition = 'all 0.2s ease-in-out';
+  
+  closeButton.addEventListener('mouseover', () => {
+    closeButton.style.opacity = '0.9';
+    closeButton.style.transform = 'translateY(-1px)';
+  });
+  closeButton.addEventListener('mouseout', () => {
+    closeButton.style.opacity = '1';
+    closeButton.style.transform = 'translateY(0)';
+  });
   closeButton.addEventListener('click', () => {
     menu.remove();
   });
@@ -651,6 +835,16 @@ function showCredentialSelectionMenu(credentials: Credential[]): void {
   
   // Ajouter le menu à la page
   document.body.appendChild(menu);
+  
+  // Ajouter l'effet de survol sur le menu
+  menu.addEventListener('mouseover', () => {
+    menu.style.transform = 'translateY(-2px)';
+    menu.style.boxShadow = '0 6px 8px rgba(0, 0, 0, 0.15)';
+  });
+  menu.addEventListener('mouseout', () => {
+    menu.style.transform = 'translateY(0)';
+    menu.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  });
   
   // Fermer le menu après 30 secondes s'il n'a pas été fermé
   setTimeout(() => {
@@ -678,6 +872,9 @@ function identifyInputElement(input: HTMLInputElement): FieldType {
       siteConfig.blackList.fields.ids.some(blackId => id === blackId)) {
     return 'unknown';
   } 
+  if (input.autocomplete === 'off') {
+    return 'unknown';
+  }
   
   // Vérifier le type de l'input
   if (input.type === 'password') {
@@ -926,8 +1123,145 @@ function fillPasswordForm(username: string, password: string): void {
 }
 
 /**
- * Tente de remplir automatiquement les champs OTP avec le code correspondant
+ * Affiche un menu de confirmation pour l'autofill OTP
+ * @param credential Identifiant avec OTP à utiliser
  */
+function showOTPConfirmationMenu(credential: Credential): void {
+  // Supprimer tout menu existant
+  const existingMenu = document.getElementById('skapauto-otp-confirmation-menu');
+  if (existingMenu) {
+    existingMenu.remove();
+  }
+  
+  // Créer le menu
+  const menu = document.createElement('div');
+  menu.id = 'skapauto-otp-confirmation-menu';
+  menu.style.position = 'fixed';
+  menu.style.top = '10px';
+  menu.style.right = '10px';
+  menu.style.backgroundColor = '#ced7e1';
+  menu.style.borderRadius = '0.5rem';
+  menu.style.padding = '16px';
+  menu.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  menu.style.zIndex = '9999';
+  menu.style.maxWidth = '300px';
+  menu.style.fontFamily = "'Work Sans', sans-serif";
+  menu.style.transition = 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out';
+  
+  // Ajouter un titre
+  const title = document.createElement('div');
+  title.textContent = 'Confirmer l\'autofill OTP';
+  title.style.fontFamily = "'Raleway', sans-serif";
+  title.style.fontWeight = 'bold';
+  title.style.marginBottom = '10px';
+  title.style.borderBottom = '1px solid #1d1b21';
+  title.style.paddingBottom = '5px';
+  title.style.color = '#1d1b21';
+  menu.appendChild(title);
+  
+  // Ajouter les informations du compte
+  const info = document.createElement('div');
+  info.style.marginBottom = '10px';
+  info.style.padding = '5px';
+  
+  const usernameSpan = document.createElement('div');
+  usernameSpan.textContent = `Nom d'utilisateur: ${credential.username}`;
+  usernameSpan.style.fontWeight = 'bold';
+  usernameSpan.style.color = '#1d1b21';
+  info.appendChild(usernameSpan);
+  
+  const serviceSpan = document.createElement('div');
+  serviceSpan.textContent = `Service: ${credential.url}`;
+  serviceSpan.style.color = '#474b4f';
+  serviceSpan.style.fontSize = '0.9em';
+  info.appendChild(serviceSpan);
+  
+  menu.appendChild(info);
+  
+  // Conteneur pour les boutons
+  const buttonContainer = document.createElement('div');
+  buttonContainer.style.display = 'flex';
+  buttonContainer.style.justifyContent = 'space-between';
+  buttonContainer.style.gap = '10px';
+  buttonContainer.style.marginTop = '16px';
+  
+  // Bouton Accepter
+  const acceptButton = document.createElement('div');
+  acceptButton.textContent = 'Accepter';
+  acceptButton.style.flex = '1';
+  acceptButton.style.textAlign = 'center';
+  acceptButton.style.padding = '8px';
+  acceptButton.style.backgroundColor = '#a7f3ae';
+  acceptButton.style.color = '#1d1b21';
+  acceptButton.style.borderRadius = '0.375rem';
+  acceptButton.style.cursor = 'pointer';
+  acceptButton.style.transition = 'all 0.2s ease-in-out';
+  acceptButton.addEventListener('mouseover', () => {
+    acceptButton.style.opacity = '0.9';
+    acceptButton.style.transform = 'translateY(-1px)';
+  });
+  acceptButton.addEventListener('mouseout', () => {
+    acceptButton.style.opacity = '1';
+    acceptButton.style.transform = 'translateY(0)';
+  });
+  acceptButton.addEventListener('click', async () => {
+    const otpCode = await generateTOTPCode(credential.otp!);
+    if (otpCode) {
+      fillOTPField(otpCode);
+    } else {
+      console.error('Impossible de générer le code OTP');
+    }
+    menu.remove();
+  });
+  
+  // Bouton Annuler
+  const cancelButton = document.createElement('div');
+  cancelButton.textContent = 'Annuler';
+  cancelButton.style.flex = '1';
+  cancelButton.style.textAlign = 'center';
+  cancelButton.style.padding = '8px';
+  cancelButton.style.backgroundColor = '#f2c3c2';
+  cancelButton.style.color = '#1d1b21';
+  cancelButton.style.borderRadius = '0.375rem';
+  cancelButton.style.cursor = 'pointer';
+  cancelButton.style.transition = 'all 0.2s ease-in-out';
+  cancelButton.addEventListener('mouseover', () => {
+    cancelButton.style.opacity = '0.9';
+    cancelButton.style.transform = 'translateY(-1px)';
+  });
+  cancelButton.addEventListener('mouseout', () => {
+    cancelButton.style.opacity = '1';
+    cancelButton.style.transform = 'translateY(0)';
+  });
+  cancelButton.addEventListener('click', () => {
+    menu.remove();
+  });
+  
+  buttonContainer.appendChild(acceptButton);
+  buttonContainer.appendChild(cancelButton);
+  menu.appendChild(buttonContainer);
+  
+  // Ajouter le menu à la page
+  document.body.appendChild(menu);
+  
+  // Ajouter l'effet de survol sur le menu
+  menu.addEventListener('mouseover', () => {
+    menu.style.transform = 'translateY(-2px)';
+    menu.style.boxShadow = '0 6px 8px rgba(0, 0, 0, 0.15)';
+  });
+  menu.addEventListener('mouseout', () => {
+    menu.style.transform = 'translateY(0)';
+    menu.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  });
+  
+  // Fermer le menu après 30 secondes s'il n'a pas été fermé
+  setTimeout(() => {
+    if (document.getElementById('skapauto-otp-confirmation-menu')) {
+      document.getElementById('skapauto-otp-confirmation-menu')!.remove();
+    }
+  }, 30000);
+}
+
 async function autoFillOTP(): Promise<void> {
   // Récupérer les identifiants correspondants
   const credentials = await getMatchingCredentials();
@@ -946,15 +1280,10 @@ async function autoFillOTP(): Promise<void> {
     return;
   }
   
-  // Si un seul identifiant avec OTP correspond, générer et remplir le code
+  // Si un seul identifiant avec OTP correspond, afficher le menu de confirmation
   if (credentialsWithOTP.length === 1) {
-    console.log('Un seul identifiant avec OTP trouvé, génération et remplissage du code');
-    const otpCode = await generateTOTPCode(credentialsWithOTP[0].otp!);
-    if (otpCode) {
-      fillOTPField(otpCode);
-    } else {
-      console.error('Impossible de générer le code OTP');
-    }
+    console.log('Un seul identifiant avec OTP trouvé, affichage du menu de confirmation');
+    showOTPConfirmationMenu(credentialsWithOTP[0]);
     return;
   }
   
@@ -980,66 +1309,83 @@ function showOTPSelectionMenu(credentials: Credential[]): void {
   menu.style.position = 'fixed';
   menu.style.top = '10px';
   menu.style.right = '10px';
-  menu.style.backgroundColor = '#ffffff';
-  menu.style.border = '1px solid #cccccc';
-  menu.style.borderRadius = '5px';
-  menu.style.padding = '10px';
-  menu.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.1)';
+  menu.style.backgroundColor = '#ced7e1';
+  menu.style.borderRadius = '0.5rem';
+  menu.style.padding = '16px';
+  menu.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
   menu.style.zIndex = '9999';
   menu.style.maxWidth = '300px';
-  menu.style.fontFamily = 'Arial, sans-serif';
+  menu.style.fontFamily = "'Work Sans', sans-serif";
+  menu.style.transition = 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out';
   
   // Ajouter un titre
   const title = document.createElement('div');
   title.textContent = 'Choisir un compte pour OTP';
+  title.style.fontFamily = "'Raleway', sans-serif";
   title.style.fontWeight = 'bold';
   title.style.marginBottom = '10px';
-  title.style.borderBottom = '1px solid #eeeeee';
+  title.style.borderBottom = '1px solid #1d1b21';
   title.style.paddingBottom = '5px';
+  title.style.color = '#1d1b21';
   menu.appendChild(title);
   
   // Ajouter les options
   credentials.forEach((credential, index) => {
     const option = document.createElement('div');
-    option.style.padding = '5px';
+    option.style.padding = '8px';
     option.style.cursor = 'pointer';
-    option.style.borderBottom = index < credentials.length - 1 ? '1px solid #eeeeee' : 'none';
-    option.style.display = 'flex';
-    option.style.justifyContent = 'space-between';
-    option.style.alignItems = 'center';
+    option.style.borderBottom = index < credentials.length - 1 ? '1px solid #1d1b21' : 'none';
+    option.style.transition = 'all 0.2s ease-in-out';
     
-    // Ajouter le nom d'utilisateur
-    const usernameSpan = document.createElement('span');
-    usernameSpan.textContent = credential.username;
-    usernameSpan.style.fontWeight = 'bold';
-    option.appendChild(usernameSpan);
+    // Conteneur pour les informations
+    const infoContainer = document.createElement('div');
     
-    // Ajouter la description si disponible
-    if (credential.description) {
-      const descriptionSpan = document.createElement('span');
-      descriptionSpan.textContent = credential.description;
-      descriptionSpan.style.fontSize = '0.8em';
-      descriptionSpan.style.color = '#666666';
-      option.appendChild(descriptionSpan);
+    // Service et favicon
+    const serviceContainer = document.createElement('div');
+    serviceContainer.style.display = 'flex';
+    serviceContainer.style.alignItems = 'center';
+    serviceContainer.style.marginBottom = '4px';
+    
+    if (credential.favicon) {
+      const favicon = document.createElement('img');
+      favicon.src = getFaviconUrl(credential.url || '');
+      favicon.style.width = '16px';
+      favicon.style.height = '16px';
+      favicon.style.marginRight = '8px';
+      serviceContainer.appendChild(favicon);
     }
     
-    // Ajouter l'événement de clic
-    option.addEventListener('click', async () => {
-      const otpCode = await generateTOTPCode(credential.otp!);
-      if (otpCode) {
-        fillOTPField(otpCode);
-      } else {
-        console.error('Impossible de générer le code OTP');
-      }
-      menu.remove();
-    });
+    const serviceName = document.createElement('span');
+    serviceName.textContent = credential.url || 'Identifiant';
+    serviceName.style.fontWeight = 'bold';
+    serviceName.style.color = '#1d1b21';
+    serviceContainer.appendChild(serviceName);
     
-    // Ajouter un effet de survol
+    infoContainer.appendChild(serviceContainer);
+    
+    // Nom d'utilisateur
+    const username = document.createElement('div');
+    username.textContent = credential.username;
+    username.style.fontSize = '0.9em';
+    username.style.color = '#474b4f';
+    infoContainer.appendChild(username);
+    
+    option.appendChild(infoContainer);
+    
+    // Effets de survol
     option.addEventListener('mouseover', () => {
-      option.style.backgroundColor = '#f5f5f5';
+      option.style.backgroundColor = '#f0f0f0';
+      option.style.transform = 'translateX(5px)';
     });
     option.addEventListener('mouseout', () => {
       option.style.backgroundColor = 'transparent';
+      option.style.transform = 'translateX(0)';
+    });
+    
+    // Événement de clic
+    option.addEventListener('click', () => {
+      showOTPConfirmationMenu(credential);
+      menu.remove();
     });
     
     menu.appendChild(option);
@@ -1049,11 +1395,22 @@ function showOTPSelectionMenu(credentials: Credential[]): void {
   const closeButton = document.createElement('div');
   closeButton.textContent = 'Fermer';
   closeButton.style.textAlign = 'center';
-  closeButton.style.marginTop = '10px';
-  closeButton.style.padding = '5px';
-  closeButton.style.backgroundColor = '#f5f5f5';
-  closeButton.style.borderRadius = '3px';
+  closeButton.style.marginTop = '16px';
+  closeButton.style.padding = '8px';
+  closeButton.style.backgroundColor = '#f2c3c2';
+  closeButton.style.color = '#1d1b21';
+  closeButton.style.borderRadius = '0.375rem';
   closeButton.style.cursor = 'pointer';
+  closeButton.style.transition = 'all 0.2s ease-in-out';
+  
+  closeButton.addEventListener('mouseover', () => {
+    closeButton.style.opacity = '0.9';
+    closeButton.style.transform = 'translateY(-1px)';
+  });
+  closeButton.addEventListener('mouseout', () => {
+    closeButton.style.opacity = '1';
+    closeButton.style.transform = 'translateY(0)';
+  });
   closeButton.addEventListener('click', () => {
     menu.remove();
   });
@@ -1061,6 +1418,16 @@ function showOTPSelectionMenu(credentials: Credential[]): void {
   
   // Ajouter le menu à la page
   document.body.appendChild(menu);
+  
+  // Ajouter l'effet de survol sur le menu
+  menu.addEventListener('mouseover', () => {
+    menu.style.transform = 'translateY(-2px)';
+    menu.style.boxShadow = '0 6px 8px rgba(0, 0, 0, 0.15)';
+  });
+  menu.addEventListener('mouseout', () => {
+    menu.style.transform = 'translateY(0)';
+    menu.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  });
   
   // Fermer le menu après 30 secondes s'il n'a pas été fermé
   setTimeout(() => {
@@ -1138,6 +1505,25 @@ async function generateTOTPCode(otpUri: string): Promise<string | null> {
   }
 }
 
+
+  function getFaviconUrl(domain: string): string {
+    // Nettoyer l'URL pour extraire le domaine
+    let cleanDomain = domain;
+    
+    // Supprimer le protocole s'il existe
+    if (cleanDomain.includes('://')) {
+      cleanDomain = cleanDomain.split('://')[1];
+    }
+    
+    // Supprimer le chemin s'il existe
+    if (cleanDomain.includes('/')) {
+      cleanDomain = cleanDomain.split('/')[0];
+    }
+    
+    // Utiliser Google Favicon service pour récupérer l'icône
+    return `https://www.google.com/s2/favicons?domain=${cleanDomain}&sz=32`;
+  }
+
 /**
  * Parse un URI OTP pour extraire les paramètres
  * @param uri URI OTP (otpauth://...)
@@ -1199,6 +1585,304 @@ async function calculateTOTP(params: TOTPParams): Promise<string> {
       }
     });
   });
+}
+
+/**
+ * Détecte la soumission d'un formulaire de connexion
+ */
+function setupFormSubmissionDetection(): void {
+  // Observer les événements de soumission de formulaire
+  document.addEventListener('submit', async (event) => {
+    // Identifier les champs de formulaire
+    const fields = identifyFormFields();
+    
+    // Vérifier si c'est un formulaire de connexion
+    if (fields.password.length > 0 && (fields.username.length > 0 || fields.email.length > 0)) {
+      // Récupérer les valeurs des champs
+      const passwordValue = fields.password[0].value;
+      const usernameValue = fields.username.length > 0 
+        ? fields.username[0].value 
+        : (fields.email.length > 0 ? fields.email[0].value : '');
+      
+      if (passwordValue && usernameValue) {
+        // Vérifier si ces identifiants existent déjà
+        const existingCredentials = await getMatchingCredentials();
+        const credentialExists = existingCredentials.some(cred => 
+          cred.username === usernameValue && cred.password === passwordValue
+        );
+        
+        // Si les identifiants n'existent pas encore, proposer de les enregistrer
+        if (!credentialExists) {
+          // Attendre un peu pour laisser le formulaire se soumettre
+          setTimeout(() => {
+            showSaveCredentialsModal(usernameValue, passwordValue);
+          }, 500);
+        }
+      }
+    }
+  });
+  
+  // Observer les clics sur les boutons de connexion
+  document.addEventListener('click', async (event) => {
+    const target = event.target as HTMLElement;
+    console.log(target.tagName);
+    if (target.tagName === 'BUTTON' || 
+        (target.tagName === 'INPUT' && (target.getAttribute('type') === 'submit' || target.getAttribute('type') === 'button')) || (target.tagName === 'BUTTON' && target.getAttribute('type') === 'submit')) {
+      
+      // Vérifier si le bouton est dans un formulaire de connexion
+      const fields = identifyFormFields();
+      if (fields.password.length > 0 && (fields.username.length > 0 || fields.email.length > 0)) {
+        // Récupérer les valeurs des champs
+        const passwordValue = fields.password[0].value;
+        const usernameValue = fields.username.length > 0 
+          ? fields.username[0].value 
+          : (fields.email.length > 0 ? fields.email[0].value : '');
+        
+        if (passwordValue && usernameValue) {
+          // Vérifier si ces identifiants existent déjà
+          const existingCredentials = await getMatchingCredentials();
+          const credentialExists = existingCredentials.some(cred => 
+            cred.username === usernameValue && cred.password === passwordValue
+          );
+          
+          // Si les identifiants n'existent pas encore, proposer de les enregistrer
+          if (!credentialExists) {
+            // Attendre un peu pour laisser le formulaire se soumettre
+            setTimeout(() => {
+              showSaveCredentialsModal(usernameValue, passwordValue);
+            }, 500);
+          }
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Affiche une modal pour proposer d'enregistrer les identifiants
+ * @param username Nom d'utilisateur
+ * @param password Mot de passe
+ */
+function showSaveCredentialsModal(username: string, password: string): void {
+  // Créer la modal
+  const modal = document.createElement('div');
+  modal.style.position = 'fixed';
+  modal.style.top = '20px';
+  modal.style.right = '20px';
+  modal.style.zIndex = '9999';
+  modal.style.backgroundColor = '#ffffff';
+  modal.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+  modal.style.borderRadius = '8px';
+  modal.style.padding = '16px';
+  modal.style.width = '320px';
+  modal.style.fontFamily = 'Arial, sans-serif';
+  modal.style.transition = 'all 0.3s ease-in-out';
+  
+  // Titre
+  const title = document.createElement('div');
+  title.textContent = 'Enregistrer les identifiants';
+  title.style.fontSize = '16px';
+  title.style.fontWeight = 'bold';
+  title.style.marginBottom = '12px';
+  title.style.color = '#1d1b21';
+  modal.appendChild(title);
+  
+  // Message
+  const message = document.createElement('div');
+  message.textContent = 'Voulez-vous enregistrer ces identifiants pour ce site?';
+  message.style.fontSize = '14px';
+  message.style.marginBottom = '16px';
+  message.style.color = '#474b4f';
+  modal.appendChild(message);
+  
+  // Informations sur les identifiants
+  const credInfo = document.createElement('div');
+  credInfo.style.backgroundColor = '#f5f5f5';
+  credInfo.style.padding = '8px';
+  credInfo.style.borderRadius = '4px';
+  credInfo.style.marginBottom = '16px';
+  credInfo.style.color = '#1d1b21';
+  
+  const usernameInfo = document.createElement('div');
+  usernameInfo.textContent = `Utilisateur: ${username}`;
+  usernameInfo.style.fontSize = '14px';
+  usernameInfo.style.marginBottom = '4px';
+  credInfo.appendChild(usernameInfo);
+  
+  const passwordInfo = document.createElement('div');
+  passwordInfo.textContent = `Mot de passe: ${'•'.repeat(password.length)}`;
+  passwordInfo.style.fontSize = '14px';
+  credInfo.appendChild(passwordInfo);jellyfin.klyt.eu
+
+  
+  modal.appendChild(credInfo);
+  
+  // Conteneur de boutons
+  const buttonContainer = document.createElement('div');
+  buttonContainer.style.display = 'flex';
+  buttonContainer.style.justifyContent = 'space-between';
+  
+  // Bouton Enregistrer
+  const saveButton = document.createElement('button');
+  saveButton.textContent = 'Enregistrer';
+  saveButton.style.backgroundColor = '#4caf50';
+  saveButton.style.color = 'white';
+  saveButton.style.border = 'none';
+  saveButton.style.padding = '8px 16px';
+  saveButton.style.borderRadius = '4px';
+  saveButton.style.cursor = 'pointer';
+  saveButton.style.fontWeight = 'bold';
+  saveButton.style.transition = 'background-color 0.2s';
+  
+  saveButton.addEventListener('mouseover', () => {
+    saveButton.style.backgroundColor = '#43a047';
+  });
+  
+  saveButton.addEventListener('mouseout', () => {
+    saveButton.style.backgroundColor = '#4caf50';
+  });
+  
+  saveButton.addEventListener('click', () => {
+    // Créer un nouvel identifiant
+    const newCredential: Credential = {
+      username: username,
+      password: password,
+      url: window.location.hostname,
+      description: document.title || window.location.hostname,
+      favicon: getFaviconUrl(window.location.hostname)
+    };
+    
+    // Envoyer au background script pour enregistrement
+    chrome.runtime.sendMessage({ 
+      action: 'saveNewCredential', 
+      credential: newCredential 
+    }, (response) => {
+      if (response && response.success) {
+        // Afficher un message de succès
+        // hide the modal
+        modal.style.opacity = '0';
+        setTimeout(() => {
+          modal.remove();
+        }, 300);
+        showNotification('Identifiants enregistrés avec succès!', 'success');
+      } else {
+        // Afficher un message d'erreur
+        showNotification('Erreur lors de l\'enregistrement des identifiants.', 'error');
+      }
+    });
+    
+    // Fermer la modal
+    modal.remove();
+  });
+  
+  buttonContainer.appendChild(saveButton);
+  
+  // Bouton Annuler
+  const cancelButton = document.createElement('button');
+  cancelButton.textContent = 'Annuler';
+  cancelButton.style.backgroundColor = '#f2f2f2';
+  cancelButton.style.color = '#333';
+  cancelButton.style.border = 'none';
+  cancelButton.style.padding = '8px 16px';
+  cancelButton.style.borderRadius = '4px';
+  cancelButton.style.cursor = 'pointer';
+  cancelButton.style.transition = 'background-color 0.2s';
+  
+  cancelButton.addEventListener('mouseover', () => {
+    cancelButton.style.backgroundColor = '#e0e0e0';
+  });
+  
+  cancelButton.addEventListener('mouseout', () => {
+    cancelButton.style.backgroundColor = '#f2f2f2';
+  });
+  
+  cancelButton.addEventListener('click', () => {
+    modal.remove();
+  });
+  
+  buttonContainer.appendChild(cancelButton);
+  modal.appendChild(buttonContainer);
+  
+  // Ajouter la modal au document
+  document.body.appendChild(modal);
+  
+  // Animation d'entrée
+  setTimeout(() => {
+    modal.style.transform = 'translateY(10px)';
+    setTimeout(() => {
+      modal.style.transform = 'translateY(0)';
+    }, 50);
+  }, 0);
+  
+  // Auto-fermeture après 30 secondes
+  setTimeout(() => {
+    if (document.body.contains(modal)) {
+      modal.style.opacity = '0';
+      setTimeout(() => {
+        if (document.body.contains(modal)) {
+          modal.remove();
+        }
+      }, 300);
+    }
+  }, 30000);
+}
+
+/**
+ * Affiche une notification temporaire
+ * @param message Message à afficher
+ * @param type Type de notification (success, error, info)
+ */
+function showNotification(message: string, type: 'success' | 'error' | 'info'): void {
+  // Créer la notification
+  const notification = document.createElement('div');
+  notification.style.position = 'fixed';
+  notification.style.bottom = '20px';
+  notification.style.right = '20px';
+  notification.style.zIndex = '10000';
+  notification.style.padding = '12px 16px';
+  notification.style.borderRadius = '4px';
+  notification.style.fontFamily = 'Arial, sans-serif';
+  notification.style.fontSize = '14px';
+  notification.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.1)';
+  notification.style.transition = 'all 0.3s ease-in-out';
+  notification.style.opacity = '0';
+  notification.style.transform = 'translateY(20px)';
+  
+  // Définir le style en fonction du type
+  if (type === 'success') {
+    notification.style.backgroundColor = '#4caf50';
+    notification.style.color = 'white';
+  } else if (type === 'error') {
+    notification.style.backgroundColor = '#f44336';
+    notification.style.color = 'white';
+  } else {
+    notification.style.backgroundColor = '#2196f3';
+    notification.style.color = 'white';
+  }
+  
+  notification.textContent = message;
+  
+  // Ajouter au document
+  document.body.appendChild(notification);
+  
+  // Animation d'entrée
+  setTimeout(() => {
+    notification.style.opacity = '1';
+    notification.style.transform = 'translateY(0)';
+    
+    // Auto-fermeture après 3 secondes
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      notification.style.transform = 'translateY(20px)';
+      
+      // Supprimer après la fin de l'animation
+      setTimeout(() => {
+        if (document.body.contains(notification)) {
+          notification.remove();
+        }
+      }, 300);
+    }, 3000);
+  }, 10);
 }
 
 // Exporter une fonction vide pour que le bundler ne se plaigne pas

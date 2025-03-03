@@ -6,11 +6,15 @@ import {
   uuidToStr,
   type ClientEx,
   decodeClientEx,
-  decodePassword
+  decodePassword,
+  EP,
+  encodePassword
 } from "./decoder.js";
 import { blake3 } from "@noble/hashes/blake3";
 import { xchacha20poly1305 } from "@noble/ciphers/chacha";
 import * as pkg from "uuid-tool";
+import { ml_kem1024 } from "@noble/post-quantum/ml-kem";
+import { randomBytes } from "@noble/post-quantum/utils.js";
 const { Uuid: UuidTool } = pkg;
 
 // Utiliser une URL relative pour que le proxy Vite fonctionne correctement
@@ -37,6 +41,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   return true;
 });
+
+interface SharedPass {
+  kem_ct: Uint8Array;
+  ep: EP;
+  status: ShareStatus;
+}
+
+export enum ShareStatus {
+  Pending,
+  Accepted,
+  Rejected
+}
 
 /**
  * Définit le token de session et le sauvegarde dans le background script
@@ -117,6 +133,79 @@ function getRequestOptions(method: string = "GET", body?: any): RequestInit {
   return options;
 }
 
+function encrypt(pass: Password, client: Client) {
+  const passb = encodePassword(pass);
+  if (!passb) {
+    return { result: null, error: "Échec de l'encodage du mot de passe" };
+  }
+  if (!client.ky_q) {
+    return { result: null, error: "Missing client.ky_q" };
+  }
+  const ky_q = new Uint8Array(client.ky_q);
+  const hash = blake3(ky_q).slice(0, 32);
+  const nonce = randomBytes(24);
+  const key = new Uint8Array(hash);
+  const cipher = xchacha20poly1305(key, nonce);
+  const ciphertext = cipher.encrypt(passb);
+  const ep: EP = {
+    ciphertext: ciphertext,
+    nonce: nonce,
+    nonce2: null
+  };
+  return { result: ep, error: null };
+}
+
+
+function send(ep: EP, client: Client) {
+  if (!client.secret) {
+    return { result: null, error: "Missing client.secret" };
+  }
+  const secret = new Uint8Array(client.secret);
+  const hash = blake3(secret).slice(0, 32);
+  const nonce2 = randomBytes(24);
+  const key = new Uint8Array(hash);
+  const cipher = xchacha20poly1305(key, nonce2);
+  const ciphertext = cipher.encrypt(ep.ciphertext);
+  const ep2: EP = {
+    ciphertext: ciphertext,
+    nonce: ep.nonce,
+    nonce2: nonce2
+  };
+  return { result: ep2, error: null };
+}
+
+export async function create_pass(uuid: Uuid, pass: Password, client: Client) {
+  const encrypted = encrypt(pass, client);
+  if (!encrypted.result) {
+    return { result: null, error: encrypted.error };
+  }
+  const eq = send(encrypted.result, client);
+  if (!eq.result) {
+    return { result: null, error: eq.error };
+  }
+  const truer = {
+    ciphertext: Array.from(eq.result.ciphertext),
+    nonce: Array.from(eq.result.nonce),
+    nonce2: Array.from(eq.result.nonce2!),
+  };
+  const res = await fetch(
+    API_URL + "create_pass_json/" + uuidToStr(uuid),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(truer),
+    },
+  );
+  if (!res.ok) {
+    return { result: null, error: res.statusText };
+  }
+  const result = await res.json();
+  return { result: result, error: null };
+}
+
+
 /**
  * Authentifie un client avec le serveur
  * @param uuid UUID de l'utilisateur
@@ -126,6 +215,9 @@ function getRequestOptions(method: string = "GET", body?: any): RequestInit {
 export async function auth(uuid: Uuid, client: Client) {
   try {
     // Étape 1: Obtenir le challenge
+    console.log("uuid:", uuid);
+    console.log("client:", client);
+    console.log(uuidToStr(uuid));
     const response = await fetch(
       API_URL + "challenge_json/" + uuidToStr(uuid),
       getRequestOptions()
@@ -136,12 +228,18 @@ export async function auth(uuid: Uuid, client: Client) {
 
     // Récupérer le challenge et le signer
     const challenge = await response.json();
-    const challengeBytes = Uint8Array.from(challenge);
+    const challengeBytes = arraytoUint8Array(challenge);
+
+    const di_q = new Uint8Array(client.di_q);
+
+    console.log("di_q:", di_q);
+    console.log("challengeBytes:", challengeBytes);
 
     // Importer dynamiquement ml-dsa87 pour la signature
     const { ml_dsa87 } = await import("@noble/post-quantum/ml-dsa");
-    const signature = ml_dsa87.sign(client.di_q, challengeBytes);
-    const signArray = Array.from(signature);
+    const signature = ml_dsa87.sign(di_q, challengeBytes);
+    
+    const signArray = arrayfrom(signature);
 
     // Étape 2: Vérifier la signature
     const response2 = await fetch(
@@ -187,7 +285,8 @@ export async function auth(uuid: Uuid, client: Client) {
     // Décapsuler la clé partagée
     const result2 = Uint8Array.from(await response3.json());
     const { ml_kem1024 } = await import("@noble/post-quantum/ml-kem");
-    const shared = ml_kem1024.decapsulate(result2, client.ky_q);
+    const ky_q = new Uint8Array(client.ky_q);
+    const shared = ml_kem1024.decapsulate(result2, ky_q);
     client.secret = shared;
 
     return { result: response2, client: client, error: null };
@@ -228,7 +327,12 @@ export async function get_all(
     }
 
     const result = await response.json();
-    const secretKey = client.secret;
+    const secretKey = new Uint8Array(client.secret!);
+    const hash = blake3(secretKey).slice(0, 32);
+    const key = new Uint8Array(hash);
+    const ky_q = new Uint8Array(client.ky_q);
+    const hash2 = blake3(ky_q).slice(0, 32);
+    const key2 = new Uint8Array(hash2);
 
     if (!secretKey) {
       return { passwords: [], error: "Clé secrète manquante" };
@@ -237,12 +341,11 @@ export async function get_all(
     // Décrypter les mots de passe
     const passwordsResult = result.passwords || [];
     const passwordsList: Password[] = [];
+    const sharedRecipients = result.shared || [];
 
     for (const [ep, uuidStr] of passwordsResult) {
       try {
         // Décrypter le mot de passe
-        const hash = blake3(secretKey).slice(0, 32);
-        const key = new Uint8Array(hash);
 
         if (!ep.nonce2) {
           console.error("nonce2 manquant");
@@ -272,8 +375,6 @@ export async function get_all(
           continue;
         }
 
-        const hash2 = blake3(client.ky_q).slice(0, 32);
-        const key2 = new Uint8Array(hash2);
         const cipher = xchacha20poly1305(key2, nonce);
         const finalDecrypted = cipher.decrypt(decryptedIntermediate);
         console.log("finalDecrypted:", finalDecrypted);
@@ -291,7 +392,36 @@ export async function get_all(
         console.error("Erreur lors du déchiffrement d'un mot de passe:", error);
       }
     }
-
+    for (const [sharedPass, ownerUuid, passUuid] of sharedRecipients) {
+      const sharedPassObj: SharedPass = { 
+        kem_ct: Uint8Array.from(sharedPass.kem_ct),
+        ep: {
+          ciphertext: Uint8Array.from(sharedPass.ep.ciphertext),
+          nonce: Uint8Array.from(sharedPass.ep.nonce),
+          nonce2: sharedPass.ep.nonce2 ? Uint8Array.from(sharedPass.ep.nonce2) : null
+        },
+        status: sharedPass.status
+      };
+      const sharedSecret = ml_kem1024.decapsulate(sharedPassObj.kem_ct, ky_q);
+      const secretKey = blake3(sharedSecret).slice(0, 32);
+      const key = new Uint8Array(secretKey);
+      const nonce = sharedPassObj.ep.nonce instanceof Uint8Array 
+        ? sharedPassObj.ep.nonce 
+        : Uint8Array.from(sharedPassObj.ep.nonce);
+      const cipher = xchacha20poly1305(key, nonce);
+      const ciphertext = sharedPassObj.ep.ciphertext instanceof Uint8Array 
+        ? sharedPassObj.ep.ciphertext 
+        : Uint8Array.from(sharedPassObj.ep.ciphertext);
+      const decryptedBytes = cipher.decrypt(ciphertext);
+      const password = decodePassword(decryptedBytes);
+      if (!password) {
+        console.error("Mot de passe non valide");
+        continue;
+      }
+      if (sharedPassObj.status === ShareStatus.Accepted) {
+        passwordsList.push(password);
+      }
+    }
     return { passwords: passwordsList, error: null };
   } catch (error) {
     console.error("Erreur lors de la récupération des mots de passe:", error);
@@ -315,4 +445,21 @@ export function loadClientFromFile(fileData: ArrayBuffer): ClientEx | null {
     console.error("Erreur lors du chargement du client:", error);
     return null;
   }
+}
+
+
+function arrayfrom(array: Uint8Array) {
+  let array2 = new Array(array.length);
+  for (let i = 0; i < array.length; i++) {
+    array2[i] = array[i];
+  }
+  return array2;
+}
+
+function arraytoUint8Array(array: Array<number>) {
+  let array2 = new Uint8Array(array.length);
+  for (let i = 0; i < array.length; i++) {
+    array2[i] = array[i];
+  }
+  return array2;
 }

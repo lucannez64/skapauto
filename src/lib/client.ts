@@ -18,8 +18,8 @@ import { randomBytes } from "@noble/post-quantum/utils.js";
 const { Uuid: UuidTool } = pkg;
 
 // Utiliser une URL relative pour que le proxy Vite fonctionne correctement
-const API_URL = "http://localhost:3030/";
-const API_DOMAIN = "localhost";
+const API_URL = "https://skap.klyt.eu/";
+const API_DOMAIN = "skap.klyt.eu";
 
 // Variable pour stocker le token de session
 let sessionToken: string | null = null;

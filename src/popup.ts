@@ -833,7 +833,7 @@ async function refreshPasswords() {
     
     // Envoyer un message au background script pour récupérer les mots de passe
     const response = await new Promise<any>((resolve, reject) => {
-      chrome.runtime.sendMessage({ action: 'getPasswords' }, (response) => {
+      chrome.runtime.sendMessage({ action: 'refreshPasswords' }, (response) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
         } else {

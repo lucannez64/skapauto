@@ -1,8 +1,11 @@
 // Script de contenu injecté dans les pages web
 console.log('SkapAuto content script chargé');
 
-// Définir les types de champs que nous voulons identifier
-type FieldType = 'username' | 'password' | 'email' | 'otp' | 'unknown';
+// Interface pour les champs d'autofill
+interface AutofillField {
+  element: HTMLInputElement | HTMLTextAreaElement;
+  type: "name" | "email" | "password" | "otp";
+}
 
 // Interface pour les identifiants
 interface Credential {
@@ -329,17 +332,17 @@ let otpAutofillAttempted = false;
 (async () => {
   try {
     // Vérifier s'il y a des champs de formulaire sur la page
-    const fields = identifyFormFields();
+    const fields = detectAutofillFields();
     
     // Si des champs de formulaire sont détectés, tenter l'autofill automatique
-    if (fields.password.length > 0 && (fields.username.length > 0 || fields.email.length > 0)) {
+    if (fields.some(f => f.type === "password") && (fields.some(f => f.type === "name") || fields.some(f => f.type === "email"))) {
       console.log('Champs de formulaire détectés, tentative d\'autofill automatique');
       await autoFillCredentials();
       autofillAttempted = true;
     }
     
     // Si des champs OTP sont détectés, tenter l'autofill automatique
-    if (fields.otp.length > 0) {
+    if (fields.some(f => f.type === "otp")) {
       console.log('Champs OTP détectés, tentative d\'autofill automatique');
       await autoFillOTP();
       otpAutofillAttempted = true;
@@ -356,6 +359,104 @@ let otpAutofillAttempted = false;
     console.error('Erreur lors de l\'initialisation du script de contenu:', error);
   }
 })();
+
+function detectAutofillFields(): AutofillField[] {
+  // Store detected fields
+  const autofillFields: AutofillField[] = [];
+  
+  // Regular expressions for field detection based on attributes and ID/name patterns
+  const patterns = {
+    name: /^(?:name|full[_-]?name|first[_-]?name|last[_-]?name|fname|lname|given[_-]?name|family[_-]?name|current-email|j_username|user_name|user|user-name|login|vb_login_username|user name|user id|user-id|userid|id|form_loginname|wpname|mail|loginid|login id|login_name|openid_identifier|authentication_email|openid|auth_email|auth_id|authentication_identifier|authentication_id|customer_number|customernumber|onlineid|identifier|ww_x_util|loginfmt)$/i,
+    email: /^(?:e[_-]?mail|email[_-]?address|mail|e.?mail|courriel|correo.*electr(o|ó)nico|メールアドレス|Электронной.?Почты|邮件|邮箱|電郵地址|ഇ-മെയില്‍|ഇലക്ട്രോണിക്.?മെയിൽ|ایمیل|پست.*الکترونیک|ईमेल|इलॅक्ट्रॉनिक.?मेल|(\\b|_)eposta(\\b|_)|(?:いめーる|電子.?郵便|[Ee]-?mail)(.?住所)?|email_address|email-address|emailaddress|user_email|user-email|login_email|login-email|authentication_email|auth_email|form_email|wpmail|mail_address|mail-address|mailaddress|address|e_mail|e_mail_address|emailid|email_id|email-id)$/i,
+    password: /^(?:password|pass|pwd|current[_-]?password|new[_-]?password|j_password|user_password|user-password|login_password|login-password|passwort|contraseña|senha|mot de passe|auth_pass|authentication_password|web_password|wppassword|userpassword|user-pass|form_pw|loginpassword|session_password|sessionpassword|ap_password|password1|password-1|pass-word|passw|passwrd|upassword|user_pass)$/i,
+    otp: /^(?:otp|one[_-]?time[_-]?code|verification[_-]?code|auth[_-]?code|security[_-]?code|2fa|one-time-password|one_time_password|verification-code|verification_code|verificationcode|security-code|security_code|securitycode|auth-code|auth_code|authcode|code|code-input|code_input|codeinput|pin|pin-code|pin_code|pincode|token|token-code|token_code|tokencode|mfa-code|mfa_code|mfacode|2fa-code|2fa_code|2facode|two-factor-code|two_factor_code|twofactorcode|totp|totp-code|totp_code|totpcode)$/i
+  };
+
+  // Find all input elements
+  const inputElements = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+    'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), textarea'
+  );
+  
+  // Process each input element
+  inputElements.forEach(element => {
+    // Get element attributes
+    const type = element.getAttribute("type")?.toLowerCase() || "";
+    const id = element.id.toLowerCase();
+    const name = element.name.toLowerCase();
+    const autocomplete = element.getAttribute("autocomplete")?.toLowerCase() || "";
+    
+    // Determine field type based on attributes
+    let fieldType: AutofillField["type"] | null = null;
+    
+    // Check by input type
+    if (type === "email") {
+      fieldType = "email";
+    } else if (type === "password") {
+      fieldType = "password";
+    }
+    
+    // Check by autocomplete attribute
+    if (!fieldType) {
+      if (autocomplete.includes("name") || autocomplete === "name") {
+        fieldType = "name";
+      } else if (autocomplete === "email") {
+        fieldType = "email";
+      } else if (autocomplete === "current-password" || autocomplete === "new-password") {
+        fieldType = "password";
+      } else if (autocomplete === "one-time-code") {
+        fieldType = "otp";
+      }
+    }
+    
+    // Check by id or name patterns
+    if (!fieldType) {
+      if (patterns.name.test(id) || patterns.name.test(name)) {
+        fieldType = "name";
+      } else if (patterns.email.test(id) || patterns.email.test(name)) {
+        fieldType = "email";
+      } else if (patterns.password.test(id) || patterns.password.test(name)) {
+        fieldType = "password";
+      } else if (patterns.otp.test(id) || patterns.otp.test(name)) {
+        fieldType = "otp";
+      }
+    }
+    
+    // Check by placeholder or label text
+    if (!fieldType) {
+      const placeholder = element.placeholder.toLowerCase();
+      const labelElement = document.querySelector(`label[for="${element.id}"]`);
+      const labelText = labelElement ? labelElement.textContent?.toLowerCase() || "" : "";
+      
+      if (patterns.name.test(placeholder) || patterns.name.test(labelText)) {
+        fieldType = "name";
+      } else if (patterns.email.test(placeholder) || patterns.email.test(labelText)) {
+        fieldType = "email";
+      } else if (patterns.password.test(placeholder) || patterns.password.test(labelText)) {
+        fieldType = "password";
+      } else if (patterns.otp.test(placeholder) || patterns.otp.test(labelText)) {
+        fieldType = "otp";
+      }
+    }
+    
+    // Special case for OTP: inputs with maxlength of 1 or 6 and numeric pattern
+    if (!fieldType && 
+        element instanceof HTMLInputElement && 
+        (element.maxLength === 1 || element.maxLength === 6) && 
+        element.pattern === "[0-9]*") {
+      fieldType = "otp";
+    }
+    
+    // Add the field if a type was determined
+    if (fieldType) {
+      autofillFields.push({
+        element,
+        type: fieldType
+      });
+    }
+  });
+  
+  return autofillFields;
+}
 
 /**
  * Configure un observateur de mutations pour détecter les nouveaux champs de formulaire
@@ -406,39 +507,36 @@ function setupMutationObserver(): void {
  */
 async function checkForNewLoginForms(): Promise<void> {
   // Identifier les champs de formulaire
-  const fields = identifyFormFields();
+  const fields = detectAutofillFields();
   console.log('Champs de formulaire détectés:', fields);
   
-  // Si des champs de formulaire sont détectés et que l'autofill n'a pas encore été tenté
-  if (fields.password.length > 0 || fields.username.length > 0 || fields.email.length > 0) {
-    // Vérifier si les champs sont vides (non remplis)
-    const passwordEmpty = fields.password.some(field => !field.value || field.value === '');
-    const usernameEmpty = fields.username.some(field => !field.value || field.value === '') || 
-                          (fields.username.length === 0 && fields.email.some(field => !field.value || field.value === ''));
-    console.log(usernameEmpty);
+  // Vérifier si les champs sont vides (non remplis)
+  const passwordEmpty = fields.some(f => f.type === "password" && (!f.element.value || f.element.value === ''));
+  const hasNameField = fields.some(f => f.type === "name");
+  const hasEmailField = fields.some(f => f.type === "email");
+  const nameFieldEmpty = fields.some(f => f.type === "name" && (!f.element.value || f.element.value === ''));
+  const emailFieldEmpty = fields.some(f => f.type === "email" && (!f.element.value || f.element.value === ''));
+  const usernameEmpty = nameFieldEmpty || (!hasNameField && emailFieldEmpty);
+  console.log(usernameEmpty);
 
-    
-    if (passwordEmpty && usernameEmpty) {
-      console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
-      await autoFillCredentials();
-      autofillAttempted = true;
-    } else if (passwordEmpty) {
-      console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
-      await autoFillCredentials();
-      autofillAttempted = true;
-    } else if (usernameEmpty) {
-      console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
-      await autoFillCredentials();
-      otpAutofillAttempted = true;
-    }
-    
-    
+  if (passwordEmpty && usernameEmpty) {
+    console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
+    await autoFillCredentials();
+    autofillAttempted = true;
+  } else if (passwordEmpty) {
+    console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
+    await autoFillCredentials();
+    autofillAttempted = true;
+  } else if (usernameEmpty) {
+    console.log('Nouveau formulaire de connexion détecté, tentative d\'autofill');
+    await autoFillCredentials();
+    autofillAttempted = true;
   }
   
   // Si des champs OTP sont détectés et que l'autofill OTP n'a pas encore été tenté
-  if (fields.otp.length > 0 && !otpAutofillAttempted) {
+  if (fields.some(f => f.type === "otp") && !otpAutofillAttempted) {
     // Vérifier si les champs sont vides (non remplis)
-    const otpEmpty = fields.otp.some(field => !field.value);
+    const otpEmpty = fields.some(f => f.type === "otp" && !f.element.value);
     
     if (otpEmpty) {
       console.log('Nouveau champ OTP détecté, tentative d\'autofill');
@@ -476,7 +574,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'identifyFields':
       console.log('Identifier les champs de formulaire sur la page');
       // Identifier les champs de formulaire sur la page
-      const result = identifyFormFields();
+      const result = detectAutofillFields();
       sendResponse({ success: true, fields: result });
       break;
       
@@ -765,7 +863,7 @@ function showCredentialSelectionMenu(credentials: Credential[]): void {
     
     if (credential.favicon) {
       const favicon = document.createElement('img');
-      favicon.src = credential.favicon;
+      favicon.src = getFaviconUrl(credential.url || '');
       favicon.style.width = '16px';
       favicon.style.height = '16px';
       favicon.style.marginRight = '8px';
@@ -855,148 +953,6 @@ function showCredentialSelectionMenu(credentials: Credential[]): void {
 }
 
 /**
- * Identifie un élément d'entrée en utilisant des règles communes et les listes de configuration
- * @param input Élément d'entrée à identifier
- * @returns Type de champ identifié
- */
-function identifyInputElement(input: HTMLInputElement): FieldType {
-  // Vérifier si le champ est dans la liste noire
-  const id = input.id.toLowerCase();
-  const name = input.name.toLowerCase();
-  const placeholder = input.placeholder.toLowerCase();
-  const className = input.className.toLowerCase();
-  const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
-  
-  // Vérifier si le champ est dans la liste noire
-  if (siteConfig.blackList.fields.names.some(blackName => name === blackName) ||
-      siteConfig.blackList.fields.ids.some(blackId => id === blackId)) {
-    return 'unknown';
-  } 
-  if (input.autocomplete === 'off') {
-    return 'unknown';
-  }
-  
-  // Vérifier le type de l'input
-  if (input.type === 'password') {
-    return 'password';
-  }
-  
-  if (input.type === 'email') {
-    return 'email';
-  }
-  
-  // Vérifier si c'est un champ de mot de passe en utilisant la liste blanche
-  if (siteConfig.whiteList.fields.passwordNames.some(pattern => 
-      name.includes(pattern) || 
-      placeholder.includes(pattern) || 
-      ariaLabel.includes(pattern)) ||
-      siteConfig.whiteList.fields.passwordIds.some(pattern => 
-      id.includes(pattern))) {
-    return 'password';
-  }
-  
-  // Vérifier si c'est un champ d'email en utilisant la liste blanche
-  if (siteConfig.whiteList.fields.emailNames.some(pattern => 
-      name.includes(pattern) || 
-      placeholder.includes(pattern) || 
-      ariaLabel.includes(pattern)) ||
-      siteConfig.whiteList.fields.emailIds.some(pattern => 
-      id.includes(pattern))) {
-    return 'email';
-  }
-  
-  // Vérifier si c'est un champ de nom d'utilisateur en utilisant la liste blanche
-  if (siteConfig.whiteList.fields.usernameNames.some(pattern => 
-      name.includes(pattern) || 
-      placeholder.includes(pattern) || 
-      ariaLabel.includes(pattern)) ||
-      siteConfig.whiteList.fields.usernameIds.some(pattern => 
-      id.includes(pattern))) {
-    return 'username';
-  }
-  
-  // Vérifier les attributs pour identifier le champ avec des patterns génériques
-  const passwordPatterns = ['password', 'passwd', 'pass', 'pwd', 'mot de passe', 'contraseña'];
-  if (passwordPatterns.some(pattern => 
-      className.includes(pattern))) {
-    return 'password';
-  }
-  
-  const emailPatterns = ['email', 'e-mail', 'courriel'];
-  if (emailPatterns.some(pattern => 
-      className.includes(pattern))) {
-    return 'email';
-  }
-  
-  const usernamePatterns = ['username', 'user', 'login', 'id', 'identifier', 'nom d\'utilisateur', 'utilisateur', 'usuario'];
-  if (usernamePatterns.some(pattern => 
-      className.includes(pattern))) {
-    return 'username';
-  }
-  
-  // Vérifier si c'est un champ OTP en utilisant la liste blanche
-  if (siteConfig.whiteList.fields.otpNames.some(pattern => 
-      name.includes(pattern) || 
-      placeholder.includes(pattern) || 
-      ariaLabel.includes(pattern)) ||
-      siteConfig.whiteList.fields.otpIds.some(pattern => 
-      id.includes(pattern))) {
-    return 'otp';
-  }
-
-  if (input.autocomplete === 'one-time-code') {
-    return 'otp';
-  }
-  
-  if (input.type === 'text' && input.autocomplete === 'on') {
-    return 'username';
-  }
-
-  // Vérifier si c'est un champ OTP basé sur des caractéristiques spécifiques
-  // Les champs OTP sont souvent des champs numériques courts
-  if (input.type === 'number' || input.type === 'tel') {
-    // Vérifier si le champ a une longueur maximale de 4-8 caractères
-    const maxLength = input.getAttribute('maxlength');
-    if (maxLength && parseInt(maxLength) >= 4 && parseInt(maxLength) <= 8) {
-      return 'otp';
-    }
-    
-    // Vérifier si le champ a un pattern pour les chiffres uniquement
-    const pattern = input.getAttribute('pattern');
-    if (pattern && (pattern === '[0-9]*' || pattern === '\\d*')) {
-      return 'otp';
-    }
-  }
-  
-  // Vérifier si le champ est un input court pour un code
-  if (input.type === 'text' && input.getAttribute('maxlength') && 
-      parseInt(input.getAttribute('maxlength')!) >= 4 && 
-      parseInt(input.getAttribute('maxlength')!) <= 8) {
-    // Vérifier si le placeholder ou le label suggère un code
-    if (placeholder.includes('code') || 
-        placeholder.includes('pin') || 
-        ariaLabel.includes('code') || 
-        ariaLabel.includes('pin')) {
-      return 'otp';
-    }
-  }
-  
-  // Si le champ est visible et de type texte, c'est probablement un champ de nom d'utilisateur
-  if (input.type === 'text' && isVisibleElement(input)) {
-    // Vérifier si le champ est dans un formulaire qui contient un champ de mot de passe
-    const form = input.closest('form');
-    if (form) {
-      const passwordField = form.querySelector('input[type="password"]');
-      if (passwordField) {
-        return 'username';
-      }
-    }
-  }
-  
-  return 'unknown';
-}
-
-/**
  * Vérifie si un élément est visible sur la page
  * @param element Élément à vérifier
  * @returns true si l'élément est visible
@@ -1011,43 +967,10 @@ function isVisibleElement(element: HTMLElement): boolean {
 
 /**
  * Identifie tous les champs de formulaire sur la page
- * @returns Objet contenant les champs identifiés
+ * @returns Liste des champs d'autofill détectés
  */
-function identifyFormFields(): Record<FieldType, HTMLInputElement[]> {
-  const inputs = document.querySelectorAll('input');
-  const result: Record<FieldType, HTMLInputElement[]> = {
-    username: [],
-    password: [],
-    email: [],
-    otp: [],
-    unknown: []
-  };
-  
-  // Identifier chaque élément d'entrée
-  for (const input of Array.from(inputs)) {
-    const inputElement = input as HTMLInputElement;
-    // Ignorer les champs cachés et les boutons
-    if (inputElement.type === 'hidden' || 
-        inputElement.type === 'submit' || 
-        inputElement.type === 'button' || 
-        inputElement.type === 'range' ||
-        inputElement.type === 'color' ||
-        inputElement.type === 'date' ||
-        inputElement.type === 'datetime-local' ||
-        inputElement.type === 'month' ||
-        inputElement.type === 'week' ||
-        inputElement.type === 'time' ||
-        inputElement.type === 'checkbox' || 
-        inputElement.type === 'search' ||
-        inputElement.type === 'radio') {
-      continue;
-    }
-    
-    const fieldType = identifyInputElement(inputElement);
-    result[fieldType].push(inputElement);
-  }
-  
-  return result;
+function identifyFormFields(): AutofillField[] {
+  return detectAutofillFields();
 }
 
 /**
@@ -1057,17 +980,17 @@ function identifyFormFields(): Record<FieldType, HTMLInputElement[]> {
  */
 function fillPasswordForm(username: string, password: string): void {
   // Identifier les champs
-  const fields = identifyFormFields();
+  const fields = detectAutofillFields();
   console.log(fields);
   // Remplir le champ de nom d'utilisateur
-  if (fields.username.length > 0) {
-    const usernameField = fields.username[0];
+  if (fields.some(f => f.type === "name")) {
+    const usernameField = fields.find(f => f.type === "name")?.element as HTMLInputElement;
     usernameField.value = username;
     usernameField.dispatchEvent(new Event('input', { bubbles: true }));
     usernameField.dispatchEvent(new Event('change', { bubbles: true }));
-  } else if (fields.email.length > 0) {
+  } else if (fields.some(f => f.type === "email")) {
     // Si pas de champ username mais un champ email, utiliser celui-ci
-    const emailField = fields.email[0];
+    const emailField = fields.find(f => f.type === "email")?.element as HTMLInputElement;
     emailField.value = username;
     emailField.dispatchEvent(new Event('input', { bubbles: true }));
     emailField.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1083,8 +1006,8 @@ function fillPasswordForm(username: string, password: string): void {
   }
   
   // Remplir le champ de mot de passe
-  if (fields.password.length > 0) {
-    const passwordField = fields.password[0];
+  if (fields.some(f => f.type === "password")) {
+    const passwordField = fields.find(f => f.type === "password")?.element as HTMLInputElement;
     passwordField.value = password;
     passwordField.dispatchEvent(new Event('input', { bubbles: true }));
     passwordField.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1103,12 +1026,12 @@ function fillPasswordForm(username: string, password: string): void {
   setTimeout(() => {
     // Chercher le formulaire parent
     let form: HTMLFormElement | null = null;
-    if (fields.password.length > 0) {
-      form = fields.password[0].closest('form');
-    } else if (fields.username.length > 0) {
-      form = fields.username[0].closest('form');
-    } else if (fields.email.length > 0) {
-      form = fields.email[0].closest('form');
+    if (fields.some(f => f.type === "password")) {
+      form = fields.find(f => f.type === "password")?.element.closest('form') || null;
+    } else if (fields.some(f => f.type === "name")) {
+      form = fields.find(f => f.type === "name")?.element.closest('form') || null;
+    } else if (fields.some(f => f.type === "email")) {
+      form = fields.find(f => f.type === "email")?.element.closest('form') || null;
     }
     
     // Si un formulaire est trouvé, tenter de le soumettre
@@ -1443,12 +1366,12 @@ function showOTPSelectionMenu(credentials: Credential[]): void {
  */
 function fillOTPField(otp: string): void {
   // Identifier les champs
-  const fields = identifyFormFields();
-  console.log('Champs OTP identifiés:', fields.otp);
+  const fields = detectAutofillFields();
+  console.log('Champs OTP identifiés:', fields.filter(f => f.type === "otp"));
   
   // Si des champs OTP sont trouvés, remplir le premier
-  if (fields.otp.length > 0) {
-    const otpField = fields.otp[0];
+  if (fields.some(f => f.type === "otp")) {
+    const otpField = fields.find(f => f.type === "otp")?.element as HTMLInputElement;
     otpField.value = otp;
     otpField.dispatchEvent(new Event('input', { bubbles: true }));
     otpField.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1594,15 +1517,15 @@ function setupFormSubmissionDetection(): void {
   // Observer les événements de soumission de formulaire
   document.addEventListener('submit', async (event) => {
     // Identifier les champs de formulaire
-    const fields = identifyFormFields();
+    const fields = detectAutofillFields();
     
     // Vérifier si c'est un formulaire de connexion
-    if (fields.password.length > 0 && (fields.username.length > 0 || fields.email.length > 0)) {
+    if (fields.some(f => f.type === "password") && (fields.some(f => f.type === "name") || fields.some(f => f.type === "email"))) {
       // Récupérer les valeurs des champs
-      const passwordValue = fields.password[0].value;
-      const usernameValue = fields.username.length > 0 
-        ? fields.username[0].value 
-        : (fields.email.length > 0 ? fields.email[0].value : '');
+      const passwordValue = fields.find(f => f.type === "password")?.element.value;
+      const usernameValue = fields.some(f => f.type === "name") 
+        ? fields.find(f => f.type === "name")?.element.value 
+        : fields.some(f => f.type === "email") ? fields.find(f => f.type === "email")?.element.value : '';
       
       if (passwordValue && usernameValue) {
         // Vérifier si ces identifiants existent déjà
@@ -1630,13 +1553,13 @@ function setupFormSubmissionDetection(): void {
         (target.tagName === 'INPUT' && (target.getAttribute('type') === 'submit' || target.getAttribute('type') === 'button')) || (target.tagName === 'BUTTON' && target.getAttribute('type') === 'submit')) {
       
       // Vérifier si le bouton est dans un formulaire de connexion
-      const fields = identifyFormFields();
-      if (fields.password.length > 0 && (fields.username.length > 0 || fields.email.length > 0)) {
+      const fields = detectAutofillFields();
+      if (fields.some(f => f.type === "password") && (fields.some(f => f.type === "name") || fields.some(f => f.type === "email"))) {
         // Récupérer les valeurs des champs
-        const passwordValue = fields.password[0].value;
-        const usernameValue = fields.username.length > 0 
-          ? fields.username[0].value 
-          : (fields.email.length > 0 ? fields.email[0].value : '');
+        const passwordValue = fields.find(f => f.type === "password")?.element.value;
+        const usernameValue = fields.some(f => f.type === "name") 
+          ? fields.find(f => f.type === "name")?.element.value 
+          : fields.some(f => f.type === "email") ? fields.find(f => f.type === "email")?.element.value : '';
         
         if (passwordValue && usernameValue) {
           // Vérifier si ces identifiants existent déjà
@@ -1664,82 +1587,88 @@ function setupFormSubmissionDetection(): void {
  * @param password Mot de passe
  */
 function showSaveCredentialsModal(username: string, password: string): void {
+  // Supprimer toute modal existante
+  const existingModal = document.getElementById('skapauto-save-credentials-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+
   // Créer la modal
   const modal = document.createElement('div');
+  modal.id = 'skapauto-save-credentials-modal';
   modal.style.position = 'fixed';
-  modal.style.top = '20px';
-  modal.style.right = '20px';
-  modal.style.zIndex = '9999';
-  modal.style.backgroundColor = '#ffffff';
-  modal.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-  modal.style.borderRadius = '8px';
+  modal.style.top = '10px';
+  modal.style.right = '10px';
+  modal.style.backgroundColor = '#ced7e1';
+  modal.style.borderRadius = '0.5rem';
   modal.style.padding = '16px';
-  modal.style.width = '320px';
-  modal.style.fontFamily = 'Arial, sans-serif';
-  modal.style.transition = 'all 0.3s ease-in-out';
+  modal.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  modal.style.zIndex = '9999';
+  modal.style.maxWidth = '300px';
+  modal.style.fontFamily = "'Work Sans', sans-serif";
+  modal.style.transition = 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out, opacity 0.3s ease-in-out';
   
-  // Titre
+  // Ajouter un titre
   const title = document.createElement('div');
   title.textContent = 'Enregistrer les identifiants';
-  title.style.fontSize = '16px';
+  title.style.fontFamily = "'Raleway', sans-serif";
   title.style.fontWeight = 'bold';
-  title.style.marginBottom = '12px';
+  title.style.marginBottom = '10px';
+  title.style.borderBottom = '1px solid #1d1b21';
+  title.style.paddingBottom = '5px';
   title.style.color = '#1d1b21';
   modal.appendChild(title);
   
-  // Message
-  const message = document.createElement('div');
-  message.textContent = 'Voulez-vous enregistrer ces identifiants pour ce site?';
-  message.style.fontSize = '14px';
-  message.style.marginBottom = '16px';
-  message.style.color = '#474b4f';
-  modal.appendChild(message);
-  
   // Informations sur les identifiants
-  const credInfo = document.createElement('div');
-  credInfo.style.backgroundColor = '#f5f5f5';
-  credInfo.style.padding = '8px';
-  credInfo.style.borderRadius = '4px';
-  credInfo.style.marginBottom = '16px';
-  credInfo.style.color = '#1d1b21';
+  const info = document.createElement('div');
+  info.style.marginBottom = '10px';
+  info.style.padding = '5px';
   
-  const usernameInfo = document.createElement('div');
-  usernameInfo.textContent = `Utilisateur: ${username}`;
-  usernameInfo.style.fontSize = '14px';
-  usernameInfo.style.marginBottom = '4px';
-  credInfo.appendChild(usernameInfo);
+  const usernameSpan = document.createElement('div');
+  usernameSpan.textContent = `Utilisateur: ${username}`;
+  usernameSpan.style.fontWeight = 'bold';
+  usernameSpan.style.color = '#1d1b21';
+  info.appendChild(usernameSpan);
   
-  const passwordInfo = document.createElement('div');
-  passwordInfo.textContent = `Mot de passe: ${'•'.repeat(password.length)}`;
-  passwordInfo.style.fontSize = '14px';
-  credInfo.appendChild(passwordInfo);jellyfin.klyt.eu
-
+  const passwordSpan = document.createElement('div');
+  passwordSpan.textContent = `Mot de passe: ${'•'.repeat(password.length)}`;
+  passwordSpan.style.color = '#474b4f';
+  passwordSpan.style.fontSize = '0.9em';
+  info.appendChild(passwordSpan);
   
-  modal.appendChild(credInfo);
+  const serviceSpan = document.createElement('div');
+  serviceSpan.textContent = `Service: ${window.location.hostname}`;
+  serviceSpan.style.color = '#474b4f';
+  serviceSpan.style.fontSize = '0.9em';
+  info.appendChild(serviceSpan);
   
-  // Conteneur de boutons
+  modal.appendChild(info);
+  
+  // Conteneur pour les boutons
   const buttonContainer = document.createElement('div');
   buttonContainer.style.display = 'flex';
   buttonContainer.style.justifyContent = 'space-between';
   
   // Bouton Enregistrer
-  const saveButton = document.createElement('button');
+  const saveButton = document.createElement('div');
   saveButton.textContent = 'Enregistrer';
-  saveButton.style.backgroundColor = '#4caf50';
-  saveButton.style.color = 'white';
-  saveButton.style.border = 'none';
-  saveButton.style.padding = '8px 16px';
-  saveButton.style.borderRadius = '4px';
+  saveButton.style.flex = '1';
+  saveButton.style.textAlign = 'center';
+  saveButton.style.padding = '8px';
+  saveButton.style.backgroundColor = '#a7f3ae';
+  saveButton.style.color = '#1d1b21';
+  saveButton.style.borderRadius = '0.375rem';
   saveButton.style.cursor = 'pointer';
-  saveButton.style.fontWeight = 'bold';
-  saveButton.style.transition = 'background-color 0.2s';
+  saveButton.style.transition = 'all 0.2s ease-in-out';
   
   saveButton.addEventListener('mouseover', () => {
-    saveButton.style.backgroundColor = '#43a047';
+    saveButton.style.opacity = '0.9';
+    saveButton.style.transform = 'translateY(-1px)';
   });
   
   saveButton.addEventListener('mouseout', () => {
-    saveButton.style.backgroundColor = '#4caf50';
+    saveButton.style.opacity = '1';
+    saveButton.style.transform = 'translateY(0)';
   });
   
   saveButton.addEventListener('click', () => {
@@ -1758,70 +1687,72 @@ function showSaveCredentialsModal(username: string, password: string): void {
       credential: newCredential 
     }, (response) => {
       if (response && response.success) {
-        // Afficher un message de succès
-        // hide the modal
+        // Animation de disparition
         modal.style.opacity = '0';
         setTimeout(() => {
           modal.remove();
+          showNotification('Identifiants enregistrés avec succès!', 'success');
         }, 300);
-        showNotification('Identifiants enregistrés avec succès!', 'success');
       } else {
-        // Afficher un message d'erreur
         showNotification('Erreur lors de l\'enregistrement des identifiants.', 'error');
       }
     });
-    
-    // Fermer la modal
-    modal.remove();
   });
   
-  buttonContainer.appendChild(saveButton);
-  
   // Bouton Annuler
-  const cancelButton = document.createElement('button');
+  const cancelButton = document.createElement('div');
   cancelButton.textContent = 'Annuler';
-  cancelButton.style.backgroundColor = '#f2f2f2';
-  cancelButton.style.color = '#333';
-  cancelButton.style.border = 'none';
-  cancelButton.style.padding = '8px 16px';
-  cancelButton.style.borderRadius = '4px';
+  cancelButton.style.flex = '1';
+  cancelButton.style.textAlign = 'center';
+  cancelButton.style.padding = '8px';
+  cancelButton.style.backgroundColor = '#f2c3c2';
+  cancelButton.style.color = '#1d1b21';
+  cancelButton.style.borderRadius = '0.375rem';
   cancelButton.style.cursor = 'pointer';
-  cancelButton.style.transition = 'background-color 0.2s';
+  cancelButton.style.transition = 'all 0.2s ease-in-out';
   
   cancelButton.addEventListener('mouseover', () => {
-    cancelButton.style.backgroundColor = '#e0e0e0';
+    cancelButton.style.opacity = '0.9';
+    cancelButton.style.transform = 'translateY(-1px)';
   });
   
   cancelButton.addEventListener('mouseout', () => {
-    cancelButton.style.backgroundColor = '#f2f2f2';
+    cancelButton.style.opacity = '1';
+    cancelButton.style.transform = 'translateY(0)';
   });
   
   cancelButton.addEventListener('click', () => {
-    modal.remove();
+    modal.style.opacity = '0';
+    setTimeout(() => {
+      modal.remove();
+    }, 300);
   });
   
+  buttonContainer.appendChild(saveButton);
   buttonContainer.appendChild(cancelButton);
   modal.appendChild(buttonContainer);
   
   // Ajouter la modal au document
   document.body.appendChild(modal);
   
-  // Animation d'entrée
-  setTimeout(() => {
-    modal.style.transform = 'translateY(10px)';
-    setTimeout(() => {
-      modal.style.transform = 'translateY(0)';
-    }, 50);
-  }, 0);
+  // Ajouter l'effet de survol sur le menu
+  modal.addEventListener('mouseover', () => {
+    modal.style.transform = 'translateY(-2px)';
+    modal.style.boxShadow = '0 6px 8px rgba(0, 0, 0, 0.15)';
+  });
   
-  // Auto-fermeture après 30 secondes
+  modal.addEventListener('mouseout', () => {
+    modal.style.transform = 'translateY(0)';
+    modal.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  });
+  
+  // Fermer le menu après 30 secondes s'il n'a pas été fermé
   setTimeout(() => {
-    if (document.body.contains(modal)) {
-      modal.style.opacity = '0';
+    if (document.getElementById('skapauto-save-credentials-modal')) {
+      const modalElement = document.getElementById('skapauto-save-credentials-modal')!;
+      modalElement.style.opacity = '0';
       setTimeout(() => {
-        if (document.body.contains(modal)) {
-          modal.remove();
-        }
+        modalElement.remove();
       }, 300);
     }
   }, 30000);

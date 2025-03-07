@@ -73,6 +73,20 @@ function setSessionToken(token: string) {
 }
 
 /**
+ * Récupère le token de session
+ * @returns Token de session
+ */
+function getSessionToken() {
+  if (!sessionToken) {
+    chrome.runtime.sendMessage({ action: "getSessionToken" }, (response) => {
+      sessionToken = response.token;
+    });
+  } else {
+    return sessionToken;
+  }
+}
+
+/**
  * Récupère les cookies pour un domaine spécifique
  * @param domain Domaine pour lequel récupérer les cookies
  * @returns Promise avec les cookies
@@ -175,6 +189,12 @@ function send(ep: EP, client: Client) {
 }
 
 export async function create_pass(uuid: Uuid, pass: Password, client: Client) {
+  if (!sessionToken) {
+    sessionToken = getSessionToken() ?? null;
+    if (!sessionToken) {
+      return { result: null, error: "Token de session manquant" };
+    }
+  }
   const encrypted = encrypt(pass, client);
   if (!encrypted.result) {
     return { result: null, error: encrypted.error };
@@ -194,6 +214,7 @@ export async function create_pass(uuid: Uuid, pass: Password, client: Client) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": sessionToken ?? "",
       },
       body: JSON.stringify(truer),
     },

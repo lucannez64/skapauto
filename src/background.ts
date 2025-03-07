@@ -212,6 +212,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true; // Indique que la réponse sera envoyée de manière asynchrone
       
+    case 'refreshPasswords':
+      // Récupérer tous les mots de passe depuis le serveur
+      if (currentClient && currentClient.id.id) {
+        get_all(currentClient.id.id!, currentClient.c)
+          .then(result => {
+            if (result.error) {
+              sendResponse({ success: false, message: result.error });
+            } else {
+              // Stocker les mots de passe en cache
+              const passwords = result.passwords;
+              if (passwords && passwords.length > 0) {
+                cachedPasswords = passwords;
+                // Stocker les mots de passe de manière sécurisée
+                storePasswordsSecurely(passwords)
+                  .then(() => {
+                    console.log('Mots de passe récupérés et stockés de manière sécurisée');
+                    sendResponse({ success: true, passwords: passwords });
+                  });
+              }
+            }
+          });
+      } else {
+        sendResponse({ success: false, message: 'Client ou UUID manquant' });
+      }
+      return true; // Indique que la réponse sera envoyée de manière asynchrone
+    
     case 'saveSessionToken':
       // Sauvegarder le token de session
       if (message.token) {
@@ -221,6 +247,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, message: 'Token de session manquant' });
       }
       break;
+
+    case 'getSessionToken':
+      // Récupérer le token de session
+      getSessionToken().then((token) => {
+        if (token) {
+          sendResponse({ success: true, token: token });
+        } else {
+          sendResponse({ success: false, message: 'Token de session manquant' });
+        }
+      });
+      return true; // Indique que la réponse sera envoyée de manière asynchrone
 
     case 'checkSecurePasswords':
       // Vérifier si des mots de passe sécurisés sont disponibles

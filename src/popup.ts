@@ -441,19 +441,30 @@ getPasswordsBtn.addEventListener('click', () => {
 // Fonction pour afficher un message de statut
 function showStatus(message: string, type: 'success' | 'error' | 'info'): void {
   // Définir l'icône en fonction du type de message
-  let icon = '';
-  switch (type) {
-    case 'success':
-      icon = '<i class="fas fa-check-circle"></i>';
-      break;
-    case 'error':
-      icon = '<i class="fas fa-exclamation-circle"></i>';
-      break;
-    case 'info':
-    default:
-      icon = '<i class="fas fa-info-circle"></i>';
-      break;
-  }
+  const iconClass = type === 'success' 
+    ? 'fas fa-check-circle' 
+    : type === 'error' 
+      ? 'fas fa-exclamation-circle' 
+      : 'fas fa-info-circle';
+  
+  // Fonction pour créer le contenu du message
+  const createMessageContent = () => {
+    // Vider le contenu actuel
+    while (statusMessage.firstChild) {
+      statusMessage.removeChild(statusMessage.firstChild);
+    }
+    
+    // Créer l'icône
+    const iconElement = document.createElement('i');
+    iconElement.className = iconClass;
+    statusMessage.appendChild(iconElement);
+    
+    // Ajouter un espace
+    statusMessage.appendChild(document.createTextNode(' '));
+    
+    // Ajouter le message
+    statusMessage.appendChild(document.createTextNode(message));
+  };
   
   // Si un message est déjà affiché, le faire disparaître d'abord
   if (statusMessage.style.display === 'flex') {
@@ -462,7 +473,7 @@ function showStatus(message: string, type: 'success' | 'error' | 'info'): void {
     
     setTimeout(() => {
       // Mettre à jour le contenu et la classe du message
-      statusMessage.innerHTML = `${icon} ${message}`;
+      createMessageContent();
       statusMessage.className = `status ${type}`;
       
       // Afficher le message avec une animation
@@ -479,7 +490,7 @@ function showStatus(message: string, type: 'success' | 'error' | 'info'): void {
     }, 300);
   } else {
     // Mettre à jour le contenu et la classe du message
-    statusMessage.innerHTML = `${icon} ${message}`;
+    createMessageContent();
     statusMessage.className = `status ${type}`;
     
     // Afficher le message avec une animation
@@ -521,11 +532,19 @@ function displayPasswords(passwords: Password[]): void {
     passwordList.style.transform = 'translateY(-10px)';
     
     setTimeout(() => {
-      passwordList.innerHTML = '';
+      // Vider la liste de manière sécurisée
+      while (passwordList.firstChild) {
+        passwordList.removeChild(passwordList.firstChild);
+      }
+      
       renderPasswordList(passwords);
     }, 300);
   } else {
-    passwordList.innerHTML = '';
+    // Vider la liste de manière sécurisée
+    while (passwordList.firstChild) {
+      passwordList.removeChild(passwordList.firstChild);
+    }
+    
     renderPasswordList(passwords);
   }
 }
@@ -615,7 +634,19 @@ function renderPasswordList(passwords: Password[]): void {
     // Bouton pour copier le mot de passe
     const copyBtn = document.createElement('button');
     copyBtn.className = 'copy-btn';
-    copyBtn.innerHTML = `<i class="fas fa-copy"></i> ${t('copyPassword')}`;
+    
+    // Créer l'icône et le texte de manière sécurisée
+    const copyIcon = document.createElement('i');
+    copyIcon.className = 'fas fa-copy';
+    copyBtn.appendChild(copyIcon);
+    
+    // Ajouter un espace
+    copyBtn.appendChild(document.createTextNode(' '));
+    
+    // Ajouter le texte
+    const copyText = document.createTextNode(t('copyPassword'));
+    copyBtn.appendChild(copyText);
+    
     copyBtn.addEventListener('click', () => {
       // Copier le mot de passe dans le presse-papiers
       navigator.clipboard.writeText(password.password || '')
@@ -623,13 +654,20 @@ function renderPasswordList(passwords: Password[]): void {
           // Effet de pulsation pour indiquer le succès
           copyBtn.style.animation = 'pulse 0.3s ease';
           
-          // Changer temporairement le texte du bouton pour indiquer le succès
-          const originalText = copyBtn.innerHTML;
-          copyBtn.innerHTML = `<i class="fas fa-check"></i> ${t('copied')}`;
+          // Sauvegarder les éléments originaux
+          const originalIcon = copyIcon.cloneNode(true) as HTMLElement;
+          const originalText = copyText.textContent;
+          
+          // Changer temporairement l'icône et le texte du bouton pour indiquer le succès
+          copyIcon.className = 'fas fa-check';
+          copyText.textContent = t('copied');
           
           setTimeout(() => {
             copyBtn.style.animation = '';
-            copyBtn.innerHTML = originalText;
+            
+            // Restaurer l'icône et le texte originaux
+            copyIcon.className = originalIcon.className;
+            copyText.textContent = originalText;
           }, 2000);
           
           showStatus(t('passwordCopied'), 'success');
@@ -640,47 +678,6 @@ function renderPasswordList(passwords: Password[]): void {
         });
     });
     actions.appendChild(copyBtn);
-    
-    // Bouton pour remplir automatiquement les champs
-    const fillBtn = document.createElement('button');
-    fillBtn.className = 'fill-btn';
-    fillBtn.innerHTML = `<i class="fas fa-sign-in-alt"></i> ${t('fill')}`;
-    fillBtn.addEventListener('click', () => {
-      // Effet de pulsation pour indiquer l'action
-      fillBtn.style.animation = 'pulse 0.3s ease';
-      
-      // Envoyer un message au content script pour remplir les champs
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0].id) {
-          chrome.tabs.sendMessage(
-            tabs[0].id,
-            {
-              action: 'fillCredentials',
-              username: password.username,
-              password: password.password
-            },
-            (response) => {
-              setTimeout(() => {
-                fillBtn.style.animation = '';
-              }, 300);
-              
-              if (response && response.success) {
-                showStatus('Champs remplis avec succès', 'success');
-              } else {
-                showStatus('Impossible de remplir les champs', 'error');
-              }
-            }
-          );
-        } else {
-          setTimeout(() => {
-            fillBtn.style.animation = '';
-          }, 300);
-          showStatus('Aucun onglet actif trouvé', 'error');
-        }
-      });
-    });
-    actions.appendChild(fillBtn);
-    
     passwordItem.appendChild(actions);
     passwordList.appendChild(passwordItem);
     
@@ -742,8 +739,25 @@ async function classifyFields() {
   try {
     // Afficher un indicateur de chargement
     const classifyBtn = document.getElementById('classifyFieldsBtn') as HTMLButtonElement;
-    const originalText = classifyBtn.innerHTML;
-    classifyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Classification en cours...';
+    
+    // Sauvegarder les éléments originaux
+    const originalContent = Array.from(classifyBtn.childNodes).map(node => node.cloneNode(true));
+    
+    // Vider le bouton
+    while (classifyBtn.firstChild) {
+      classifyBtn.removeChild(classifyBtn.firstChild);
+    }
+    
+    // Ajouter l'icône de chargement
+    const spinnerIcon = document.createElement('i');
+    spinnerIcon.className = 'fas fa-spinner fa-spin';
+    classifyBtn.appendChild(spinnerIcon);
+    
+    // Ajouter un espace
+    classifyBtn.appendChild(document.createTextNode(' '));
+    
+    // Ajouter le texte
+    classifyBtn.appendChild(document.createTextNode('Classification en cours...'));
     classifyBtn.disabled = true;
     
     // Ajouter un effet de pulsation au bouton
@@ -801,19 +815,37 @@ async function classifyFields() {
     showStatus(`Classification terminée: ${fields.username.length + fields.password.length + fields.email.length} champs identifiés`, 'success');
     
     // Restaurer le bouton avec une animation
-    classifyBtn.innerHTML = originalText;
+    // Vider le bouton
+    while (classifyBtn.firstChild) {
+      classifyBtn.removeChild(classifyBtn.firstChild);
+    }
+    
+    // Restaurer le contenu original
+    originalContent.forEach(node => classifyBtn.appendChild(node));
     classifyBtn.disabled = false;
     classifyBtn.style.animation = 'pulse 0.3s ease';
-    setTimeout(() => {
-      classifyBtn.style.animation = '';
-    }, 300);
   } catch (error) {
     console.error('Erreur lors de la classification des champs:', error);
     showStatus(`Erreur: ${error instanceof Error ? error.message : String(error)}`, 'error');
     
     // Restaurer le bouton en cas d'erreur
     const classifyBtn = document.getElementById('classifyFieldsBtn') as HTMLButtonElement;
-    classifyBtn.innerHTML = '<i class="fas fa-tags"></i> Classifier les champs sur cette page';
+    
+    // Vider le bouton
+    while (classifyBtn.firstChild) {
+      classifyBtn.removeChild(classifyBtn.firstChild);
+    }
+    
+    // Ajouter l'icône de tags
+    const tagsIcon = document.createElement('i');
+    tagsIcon.className = 'fas fa-tags';
+    classifyBtn.appendChild(tagsIcon);
+    
+    // Ajouter un espace
+    classifyBtn.appendChild(document.createTextNode(' '));
+    
+    // Ajouter le texte
+    classifyBtn.appendChild(document.createTextNode('Classifier les champs sur cette page'));
     classifyBtn.disabled = false;
     classifyBtn.style.animation = '';
   }
@@ -824,8 +856,25 @@ async function refreshPasswords() {
   try {
     // Afficher un indicateur de chargement
     const refreshBtn = document.getElementById('refreshBtn') as HTMLButtonElement;
-    const originalText = refreshBtn.innerHTML;
-    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rafraîchissement...';
+    
+    // Sauvegarder les éléments originaux
+    const originalContent = Array.from(refreshBtn.childNodes).map(node => node.cloneNode(true));
+    
+    // Vider le bouton
+    while (refreshBtn.firstChild) {
+      refreshBtn.removeChild(refreshBtn.firstChild);
+    }
+    
+    // Ajouter l'icône de chargement
+    const spinnerIcon = document.createElement('i');
+    spinnerIcon.className = 'fas fa-spinner fa-spin';
+    refreshBtn.appendChild(spinnerIcon);
+    
+    // Ajouter un espace
+    refreshBtn.appendChild(document.createTextNode(' '));
+    
+    // Ajouter le texte
+    refreshBtn.appendChild(document.createTextNode('Rafraîchissement...'));
     refreshBtn.disabled = true;
     
     // Ajouter un effet de pulsation au bouton
@@ -858,7 +907,13 @@ async function refreshPasswords() {
     }
     
     // Restaurer le bouton avec une animation
-    refreshBtn.innerHTML = originalText;
+    // Vider le bouton
+    while (refreshBtn.firstChild) {
+      refreshBtn.removeChild(refreshBtn.firstChild);
+    }
+    
+    // Restaurer le contenu original
+    originalContent.forEach(node => refreshBtn.appendChild(node));
     refreshBtn.disabled = false;
     refreshBtn.style.animation = 'pulse 0.3s ease';
     setTimeout(() => {
@@ -870,7 +925,22 @@ async function refreshPasswords() {
     
     // Restaurer le bouton en cas d'erreur
     const refreshBtn = document.getElementById('refreshBtn') as HTMLButtonElement;
-    refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Rafraîchir les mots de passe';
+    
+    // Vider le bouton
+    while (refreshBtn.firstChild) {
+      refreshBtn.removeChild(refreshBtn.firstChild);
+    }
+    
+    // Ajouter l'icône de synchronisation
+    const syncIcon = document.createElement('i');
+    syncIcon.className = 'fas fa-sync-alt';
+    refreshBtn.appendChild(syncIcon);
+    
+    // Ajouter un espace
+    refreshBtn.appendChild(document.createTextNode(' '));
+    
+    // Ajouter le texte
+    refreshBtn.appendChild(document.createTextNode('Rafraîchir les mots de passe'));
     refreshBtn.disabled = false;
     refreshBtn.style.animation = '';
   }

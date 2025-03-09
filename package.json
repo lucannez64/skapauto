@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build ./src/background.ts --outdir ./dist --target browser --format esm && bun build ./src/content.ts --outdir ./dist --target browser --format esm && bun build ./src/popup.ts --outdir ./dist --target browser --format esm && cp src/popup.html dist/ && mkdir -p dist/icons && cp manifest.json dist/ && mkdir -p dist/models && cp src/models/model.onnx dist/models/"
+    "build": "bun build ./src/background.ts --outdir ./dist --target browser --format esm && bun build ./src/content.ts --outdir ./dist --target browser --format esm && bun build ./src/popup.ts --outdir ./dist --target browser --format esm && cp src/popup.html dist/ && mkdir -p dist/icons && cp manifest.json"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.3.3",

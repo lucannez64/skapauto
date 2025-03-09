@@ -7,8 +7,7 @@
     "storage",
     "activeTab",
     "scripting",
-    "cookies",
-    "fileSystemProvider"
+    "cookies"
   ],
   "host_permissions": [
     "https://skap.klyt.eu/*",
@@ -26,12 +25,6 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "type": "module"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["*.onnx", "*.bin", "*.json"],
-      "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {

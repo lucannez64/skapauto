@@ -6,10 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build ./src/background.ts --outdir ./dist --target browser --format esm && bun build ./src/content.ts --outdir ./dist --target browser --format esm && bun build ./src/popup.ts --outdir ./dist --target browser --format esm && cp src/popup.html dist/ && mkdir -p dist/icons && cp manifest.json"
+    "build": "bun build ./src/background.ts --outdir ./dist --target browser --format esm && bun build ./src/content.ts --outdir ./dist --target browser --format esm && bun build ./src/popup.ts --outdir ./dist --target browser --format esm && cp src/popup.html dist/ && mkdir -p dist/icons && cp manifest.json ./dist/manifest.json"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.3.3",
     "@noble/ciphers": "^1.2.1",
     "@noble/hashes": "^1.7.1",
     "@noble/post-quantum": "^0.4.0",
